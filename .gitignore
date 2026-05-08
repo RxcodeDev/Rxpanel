@@ -1,0 +1,44 @@
+# Entorno virtual
+venv/
+env/
+.venv/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+
+# Variables de entorno — NUNCA subir al repo
+.env
+.env.*
+
+# Archivos subidos por usuarios
+uploads/
+
+# Base de datos local
+*.db
+*.sqlite3
+
+# Alembic — no subir caché
+alembic/__pycache__/
+
+# IDEs
+.vscode/
+.idea/
+*.iml
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Pytest
+.pytest_cache/
+htmlcov/
+.coverage
