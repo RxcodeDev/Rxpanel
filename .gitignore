@@ -15,6 +15,7 @@ build/
 # Variables de entorno — NUNCA subir al repo
 .env
 .env.*
+!.env.example
 
 # Archivos subidos por usuarios
 uploads/
