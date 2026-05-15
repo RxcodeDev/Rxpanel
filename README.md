@@ -1,51 +1,44 @@
-# Panel API
+# Rxpanel
 
-Backend con FastAPI dockerizado.
+Web panel manager — backend FastAPI + frontend, dockerizado.
 
 ## Estructura
 
 ```
 .
-├── app/
-│   ├── main.py          # Punto de entrada
-│   ├── api/
-│   │   ├── router.py    # Router principal
-│   │   └── routes/
-│   │       └── health.py
-│   └── core/
-│       └── config.py    # Configuración (pydantic-settings)
-├── tests/
-├── Dockerfile
+├── backend/          # FastAPI + PostgreSQL
+├── frontend/         # Next.js / React
 ├── docker-compose.yml
-├── requirements.txt
-└── .env.example
+└── .env              # credenciales de postgres para docker compose
 ```
 
-## Inicio rápido
+## Inicio rápido (desde cero)
 
 ```bash
-# Copiar variables de entorno
-cp .env.example .env
+# 1. Copiar variables de entorno
+cp backend/.env.example backend/.env
+# Edita backend/.env con tus valores reales
 
-# Levantar con Docker Compose
-docker compose up --build
+# 2. Construir e iniciar
+docker compose up -d db backend
+
+# 3. Migraciones + seed (datos de prueba)
+bash backend/seed.sh
 ```
 
-La API estará disponible en `http://localhost:8000`.  
-Documentación interactiva: `http://localhost:8000/docs`
+Swagger: `http://localhost:8000/docs`
 
-## Desarrollo local (sin Docker)
+## Documentación
 
-```bash
-python -m venv .venv
-.venv\Scripts\activate   # Windows
-pip install -r requirements.txt
-uvicorn app.main:app --reload
-```
+| Documento | Descripción |
+|---|---|
+| [DOCKER.md](DOCKER.md) | Comandos Docker, logs, migraciones |
+| [backend/SEED.md](backend/SEED.md) | Poblar la BD paso a paso |
+| [backend/POSTMAN.md](backend/POSTMAN.md) | Uso con Postman |
+| [backend/DATABASE_CLIENT.md](backend/DATABASE_CLIENT.md) | Conexión con clientes SQL |
+| [backend/CONTEXT.md](backend/CONTEXT.md) | Contexto técnico completo (para IAs y devs nuevos) |
 
-## Tests
+## Dependencias clave
 
-```bash
-pip install pytest httpx
-pytest
-```
+- `bcrypt` está anclado a `<4.0.0` — ver [backend/CONTEXT.md](backend/CONTEXT.md#known-dependency-constraints)
+- Las migraciones usan SQL puro (`op.execute`) — no `op.create_table` con Enum de SQLAlchemy

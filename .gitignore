@@ -16,6 +16,12 @@ build/
 .env
 .env.*
 !.env.example
+!.env.local.example
+
+# Next.js
+frontend/.next/
+frontend/node_modules/
+frontend/out/
 
 # Archivos subidos por usuarios
 uploads/
