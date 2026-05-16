@@ -1,10 +1,21 @@
 #!/bin/bash
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT_DIR="$SCRIPT_DIR/.."
+
+# Cargar variables del .env raíz
+if [ -f "$ROOT_DIR/.env" ]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "$ROOT_DIR/.env"
+  set +a
+fi
+
 API="http://localhost:8000/api/v1"
-DB_USER="rxpanel_dba"
-DB_NAME="rxpanel"
-COMPOSE="docker compose -f $(dirname "$0")/../docker-compose.yml"
+DB_USER="${POSTGRES_USER:-rxpanel_dba}"
+DB_NAME="${POSTGRES_DB:-rxpanel}"
+COMPOSE="docker compose -f $ROOT_DIR/docker-compose.yml"
 
 echo "==> Corriendo migraciones..."
 $COMPOSE exec -T backend alembic upgrade head
