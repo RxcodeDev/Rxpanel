@@ -58,3 +58,14 @@ async def delete_site(
 ):
     site = await site_service.get_by_id(db, site_id, current_user)
     await site_service.soft_delete(db, site, current_user)
+
+
+@router.patch("/{site_id}/restore", response_model=SiteRead)
+async def restore_site(
+    site_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Reactiva un sitio que fue eliminado con soft delete."""
+    site = await site_service.restore(db, site_id, current_user)
+    return site

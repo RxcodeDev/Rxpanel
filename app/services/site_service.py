@@ -10,7 +10,6 @@ from app.schemas.site import SiteCreate, SiteUpdate
 from app.core.encryption import encrypt
 
 
-# GET ALL — admin ve todos, viewer solo los suyos
 async def get_all(db: AsyncSession, current_user: User, skip: int = 0, limit: int = 50) -> list[Site]:
     if current_user.role == UserRole.admin:
         result = await db.execute(
@@ -20,13 +19,11 @@ async def get_all(db: AsyncSession, current_user: User, skip: int = 0, limit: in
         result = await db.execute(
             select(Site)
             .where(Site.owner_id == current_user.id, Site.is_active == True)
-            .offset(skip)
-            .limit(limit)
+            .offset(skip).limit(limit)
         )
     return result.scalars().all()
 
 
-# GET BY ID — verifica owner o admin
 async def get_by_id(db: AsyncSession, site_id: int, current_user: User) -> Site:
     site = await db.get(Site, site_id)
     if not site or not site.is_active:
@@ -36,7 +33,6 @@ async def get_by_id(db: AsyncSession, site_id: int, current_user: User) -> Site:
     return site
 
 
-# CREATE — encripta api_token si viene
 async def create(db: AsyncSession, data: SiteCreate, owner_id: uuid.UUID) -> Site:
     result = await db.execute(select(Site).where(Site.url == str(data.url)))
     if result.scalar():
@@ -60,7 +56,6 @@ async def create(db: AsyncSession, data: SiteCreate, owner_id: uuid.UUID) -> Sit
     return site
 
 
-# UPDATE — re-encripta api_token solo si viene en el body
 async def update(db: AsyncSession, site: Site, data: SiteUpdate, current_user: User) -> Site:
     if current_user.role != UserRole.admin and site.owner_id != current_user.id:
         raise HTTPException(status_code=403, detail="Sin permisos para editar este sitio")
@@ -82,9 +77,21 @@ async def update(db: AsyncSession, site: Site, data: SiteUpdate, current_user: U
     return site
 
 
-# SOFT DELETE
 async def soft_delete(db: AsyncSession, site: Site, current_user: User) -> None:
     if current_user.role != UserRole.admin and site.owner_id != current_user.id:
         raise HTTPException(status_code=403, detail="Sin permisos para eliminar este sitio")
     site.is_active = False
     await db.commit()
+
+
+async def restore(db: AsyncSession, site_id: int, current_user: User) -> Site:
+    """Reactiva un sitio eliminado (is_active=False → True)."""
+    site = await db.get(Site, site_id)
+    if not site:
+        raise HTTPException(status_code=404, detail="Sitio no encontrado")
+    if current_user.role != UserRole.admin and site.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Sin permisos para restaurar este sitio")
+    site.is_active = True
+    await db.commit()
+    await db.refresh(site)
+    return site

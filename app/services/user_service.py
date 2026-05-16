@@ -4,46 +4,46 @@ from sqlalchemy import select
 from fastapi import HTTPException
 
 from app.models.user import User, UserRole
-from app.schemas.user import UserCreate, UserUpdate
+from app.schemas.user import UserCreate, UserRegister, UserUpdate
 from app.core.security import hash_password, verify_password
 
 
-# GET BY EMAIL
 async def get_by_email(db: AsyncSession, email: str) -> User | None:
     result = await db.execute(select(User).where(User.email == email))
     return result.scalars().first()
 
 
-# GET BY USERNAME
 async def get_by_username(db: AsyncSession, username: str) -> User | None:
     result = await db.execute(select(User).where(User.username == username))
     return result.scalars().first()
 
 
-# GET BY ID
 async def get_by_id(db: AsyncSession, user_id: str) -> User | None:
     return await db.get(User, user_id)
 
 
-# LIST USERS
 async def list_users(db: AsyncSession, skip: int = 0, limit: int = 50) -> list[User]:
     result = await db.execute(select(User).offset(skip).limit(limit))
     return result.scalars().all()
 
 
-# CREATE USER
-async def create(db: AsyncSession, data: UserCreate) -> User:
-    if await get_by_email(db, data.email.lower()):
+async def _validate_unique(db: AsyncSession, email: str, username: str) -> None:
+    """Valida que email y username no estén en uso."""
+    if await get_by_email(db, email.lower()):
         raise HTTPException(status_code=409, detail="Email ya registrado")
-
-    if await get_by_username(db, data.username):
+    if await get_by_username(db, username):
         raise HTTPException(status_code=409, detail="Username ya en uso")
+
+
+# REGISTRO PÚBLICO — siempre viewer, no importa nada más
+async def create_viewer(db: AsyncSession, data: UserRegister) -> User:
+    await _validate_unique(db, data.email, data.username)
 
     user = User(
         email=data.email.lower(),
         username=data.username,
         hashed_password=hash_password(data.password),
-        role=UserRole.viewer,
+        role=UserRole.viewer,  # hardcodeado, sin excepciones
         is_active=True,
     )
     db.add(user)
@@ -52,17 +52,30 @@ async def create(db: AsyncSession, data: UserCreate) -> User:
     return user
 
 
-# AUTHENTICATE
+# CREACIÓN POR ADMIN — puede asignar rol
+async def create(db: AsyncSession, data: UserCreate) -> User:
+    await _validate_unique(db, data.email, data.username)
+
+    user = User(
+        email=data.email.lower(),
+        username=data.username,
+        hashed_password=hash_password(data.password),
+        role=data.role or UserRole.viewer,  # default viewer si admin no elige
+        is_active=True,
+    )
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+    return user
+
+
 async def authenticate(db: AsyncSession, email: str, password: str) -> User | None:
     user = await get_by_email(db, email.lower())
-    if not user:
-        return None
-    if not verify_password(password, user.hashed_password):
+    if not user or not verify_password(password, user.hashed_password):
         return None
     return user
 
 
-# UPDATE USER
 async def update(db: AsyncSession, user: User, data: UserUpdate) -> User:
     update_data = data.model_dump(exclude_unset=True)
 
@@ -77,7 +90,12 @@ async def update(db: AsyncSession, user: User, data: UserUpdate) -> User:
     return user
 
 
-# SOFT DELETE — marca is_active=False, no elimina el registro
 async def soft_delete(db: AsyncSession, user: User) -> None:
     user.is_active = False
     await db.commit()
+    
+async def restore(db: AsyncSession, user: User) -> User:
+    user.is_active = True
+    await db.commit()
+    await db.refresh(user)
+    return user

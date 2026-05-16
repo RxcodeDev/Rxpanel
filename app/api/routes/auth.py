@@ -5,7 +5,7 @@ from pydantic import BaseModel, EmailStr
 
 from app.db.session import get_db
 from app.schemas.auth import LoginRequest, RefreshRequest, TokenResponse
-from app.schemas.user import UserCreate, UserRead
+from app.schemas.user import UserRegister, UserRead  # <-- UserRegister, no UserCreate
 from app.services import auth_service, user_service, password_reset_service
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -20,10 +20,10 @@ class ResetRequest(BaseModel):
     new_password: str
 
 
-# POST /auth/register
+# POST /auth/register — siempre crea como viewer, no acepta campo role
 @router.post("/register", response_model=UserRead, status_code=201)
-async def register(data: UserCreate, db: AsyncSession = Depends(get_db)):
-    return await user_service.create(db, data)
+async def register(data: UserRegister, db: AsyncSession = Depends(get_db)):
+    return await user_service.create_viewer(db, data)
 
 
 # POST /auth/login
@@ -56,7 +56,7 @@ async def recover(data: RecoverRequest, db: AsyncSession = Depends(get_db)):
     token = await password_reset_service.generate_reset_token(db, data.email)
     return {
         "message": "Token de recuperacion generado",
-        "reset_token": token        # quitar en produccion, enviar por email
+        "reset_token": token
     }
 
 
