@@ -27,6 +27,10 @@ services:
     volumes:
       - ./backend:/app
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    extra_hosts:
+      # Permite que el proxy alcance sitios servidos en el host (ej. RecTrack
+      # en http://host.docker.internal:3000) durante desarrollo local.
+      - "host.docker.internal:host-gateway"
     depends_on:
       db:
         condition: service_healthy

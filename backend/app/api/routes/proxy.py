@@ -1,12 +1,19 @@
 # app/api/routes/proxy.py
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, Query, UploadFile
+from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.core.dependencies import get_current_user
 from app.models.user import User
 from app.services import site_service
-from app.services.proxy_client import proxy_get, proxy_put, proxy_delete
+from app.services.proxy_client import (
+    proxy_get,
+    proxy_put,
+    proxy_delete,
+    proxy_post_file,
+    proxy_get_bytes,
+)
 from app.services.change_log_service import log_change
 
 router = APIRouter(prefix="/proxy", tags=["proxy"])
@@ -33,14 +40,20 @@ async def get_colors(
 ):
     site = await site_service.get_by_id(db, site_id, current_user)
     url = f"{site.url.rstrip('/')}/colors"
-    data = await proxy_get(url, site.api_token)
-    return {
-        "primary":   data.get("primary"),
-        "secondary": data.get("secondary"),
-        "accent":    data.get("accent"),
-        "bg":        data.get("bg"),
-        "text":      data.get("text"),
-    }
+    # Passthrough genérico: el sitio define qué tokens de color expone.
+    return await proxy_get(url, site.api_token)
+
+
+@router.get("/{site_id}/colors/defaults")
+async def get_colors_defaults(
+    site_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Paleta base del sitio (para revertir al tema original)."""
+    site = await site_service.get_by_id(db, site_id, current_user)
+    url = f"{site.url.rstrip('/')}/colors/defaults"
+    return await proxy_get(url, site.api_token)
 
 
 @router.get("/{site_id}/logos")
@@ -114,3 +127,43 @@ async def delete_content(
     url = f"{site.url.rstrip('/')}/content/{section}"
     await proxy_delete(url, site.api_token)
     await log_change(db, site_id, current_user.id, section, "delete_content", {"section": section})
+
+
+# ── ASSETS (upload + preview) ─────────────────────────────────────────────
+
+@router.post("/{site_id}/upload")
+async def upload_asset(
+    site_id: int,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Reenvía el archivo al sitio gestionado para que lo sirva él mismo."""
+    site = await site_service.get_by_id(db, site_id, current_user)
+    url = f"{site.url.rstrip('/')}/upload"
+    content = await file.read()
+    result = await proxy_post_file(
+        url, site.api_token, file.filename or "upload", content, file.content_type
+    )
+    await log_change(
+        db, site_id, current_user.id, "assets", "upload", {"path": result.get("path")}
+    )
+    return result
+
+
+@router.get("/{site_id}/asset")
+async def get_asset(
+    site_id: int,
+    path: str = Query(..., description="Ruta del asset en el sitio, ej. /uploads/x.png"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Sirve un asset del sitio a través del panel (para previsualización)."""
+    site = await site_service.get_by_id(db, site_id, current_user)
+    url = f"{site.url.rstrip('/')}/{path.lstrip('/')}"
+    content, ctype = await proxy_get_bytes(url, site.api_token)
+    return Response(
+        content=content,
+        media_type=ctype,
+        headers={"Cache-Control": "no-store"},
+    )

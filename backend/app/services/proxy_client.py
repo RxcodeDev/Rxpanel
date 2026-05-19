@@ -53,3 +53,37 @@ async def proxy_delete(url: str, encrypted_token: str | None, timeout: float = 1
     headers = _get_headers(encrypted_token)
     async with httpx.AsyncClient(timeout=timeout) as client:
         await _handle_errors(client.delete(url, headers=headers))
+
+
+def _auth_only_header(encrypted_token: str | None) -> dict:
+    """Solo Authorization (sin Content-Type) para multipart / binarios."""
+    if encrypted_token:
+        return {"Authorization": f"Bearer {decrypt(encrypted_token)}"}
+    return {}
+
+
+async def proxy_post_file(
+    url: str,
+    encrypted_token: str | None,
+    filename: str,
+    content: bytes,
+    content_type: str | None,
+    timeout: float = 30.0,
+) -> dict:
+    """Reenvía un archivo (multipart, campo 'file') al sitio gestionado."""
+    headers = _auth_only_header(encrypted_token)
+    files = {"file": (filename, content, content_type or "application/octet-stream")}
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        response = await _handle_errors(client.post(url, headers=headers, files=files))
+        return response.json()
+
+
+async def proxy_get_bytes(
+    url: str, encrypted_token: str | None, timeout: float = 30.0
+) -> tuple[bytes, str]:
+    """Descarga un asset del sitio y devuelve (bytes, content_type)."""
+    headers = _auth_only_header(encrypted_token)
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+        response = await _handle_errors(client.get(url, headers=headers))
+        ctype = response.headers.get("content-type", "application/octet-stream")
+        return response.content, ctype
