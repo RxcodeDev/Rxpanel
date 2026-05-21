@@ -3,12 +3,14 @@ import { InputHTMLAttributes, ReactNode } from "react";
 interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   label?: string;
   icon?: ReactNode;
+  /** Acción opcional a la derecha del campo (ej. mostrar/ocultar contraseña). */
+  trailing?: ReactNode;
   labelIcon?: ReactNode;
   error?: string;
   hint?: string;
 }
 
-export default function Input({ label, icon, labelIcon, error, hint, id, className, ...props }: InputProps) {
+export default function Input({ label, icon, trailing, labelIcon, error, hint, id, className, ...props }: InputProps) {
   return (
     <div className="flex flex-col gap-[0.375rem]">
       {label && (
@@ -33,7 +35,7 @@ export default function Input({ label, icon, labelIcon, error, hint, id, classNa
         <input
           id={id}
           className={`
-            w-full ${icon ? "pl-[2.375rem]" : "pl-3"} pr-3 py-[0.625rem]
+            w-full ${icon ? "pl-[2.375rem]" : "pl-3"} ${trailing ? "pr-[2.375rem]" : "pr-3"} py-[0.625rem]
             border rounded-[0.625rem] text-sm font-[inherit]
             text-[var(--c-text)] bg-[var(--c-bg)] outline-none
             transition-[border-color,box-shadow] duration-[0.25s]
@@ -44,6 +46,9 @@ export default function Input({ label, icon, labelIcon, error, hint, id, classNa
           `}
           {...props}
         />
+        {trailing && (
+          <span className="absolute right-1.5 flex items-center">{trailing}</span>
+        )}
       </div>
       {hint && !error && (
         <p className="text-[0.6875rem] text-[var(--c-muted)]">{hint}</p>

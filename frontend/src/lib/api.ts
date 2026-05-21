@@ -33,7 +33,9 @@ function extractDetail(body: unknown, fallback: string): string {
 }
 
 async function handle<T>(res: Response): Promise<T> {
-  if (res.status === 401 && getToken()) {
+  // Un 401 de /proxy/ lo emite el sitio destino, no el panel: no cerrar sesión.
+  const isProxyRoute = res.url.includes("/proxy/");
+  if (res.status === 401 && getToken() && !isProxyRoute) {
     clearAuth();
     if (typeof window !== "undefined") window.location.href = "/login";
   }

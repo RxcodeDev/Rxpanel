@@ -1,0 +1,169 @@
+# context.toon — Contexto del proyecto Rxpanel en formato TOON (Token-Oriented Object Notation)
+# Formato compacto para consumo por LLMs. Espejo legible: CLAUDE.md, backend/CLAUDE.md, frontend/CLAUDE.md
+
+project:
+  name: Rxpanel
+  type: monorepo
+  description: "Panel de administración de sitios web: gestiona usuarios y sitios y edita su contenido (texto, colores, logos, archivos) a través de un proxy autenticado hacia el sitio destino."
+  managed_site_contract: "RecTrack y cualquier sitio con el mismo contrato de API"
+  root: /home/dev/Documents/Rxcloud/Rxpanel
+  parts[2]: backend,frontend
+  orchestration: docker-compose.yml
+  language_policy: "comentarios y docs en español; identificadores de código en inglés"
+
+docker:
+  compose_file: docker-compose.yml
+  services[3]{name,source,host_port,notes}:
+    db,postgres:16-alpine,5432,"volumen postgres_data; healthcheck pg_isready"
+    backend,build ./backend,8000,"uvicorn --reload; extra_host host.docker.internal"
+    frontend,build ./frontend (target dev),3001,"Next.js dev en 3000 mapeado a host 3001"
+  quickstart[3]:
+    - "cp .env.example .env  # editar con valores reales"
+    - "docker compose up -d"
+    - "bash backend/seed.sh  # migraciones + datos de prueba"
+
+backend:
+  path: backend/
+  guide: backend/CLAUDE.md
+  stack:
+    framework: FastAPI >=0.115
+    runtime: Python 3.12
+    orm: SQLAlchemy 2.0 async
+    db_driver: asyncpg
+    database: PostgreSQL 16
+    migrations: Alembic
+    auth: "JWT via python-jose (access + refresh)"
+    passwords: bcrypt via passlib
+    encryption: "Fernet (cryptography) para api_token"
+    http_client: httpx
+    validation: Pydantic v2 + pydantic-settings
+    server: Uvicorn
+  api_prefix: /api/v1
+  layout:
+    routes_dir: app/api/routes/
+    business_logic: app/services/
+    models_dir: app/models/
+    schemas_dir: app/schemas/
+    core_dir: app/core/
+  models[5]{name,pk,fields,notes}:
+    User,UUID,"email,username,hashed_password,role,is_active,created_at,updated_at","role admin|viewer; soft-disable is_active; hashed_password nunca en respuestas"
+    Site,int,"name,url,description,status,is_ssl,icon,icon_color,api_token,is_active,owner_id,created_at,updated_at","status active|inactive|maintenance|error; api_token Fernet-encrypted y nunca en respuestas; soft-delete is_active; owner_id FK users"
+    ChangeLog,UUID,"site_id,user_id,section,change_type,payload_snapshot,created_at","change_type create|update|delete; payload_snapshot JSONB con el estado completo"
+    RefreshToken,UUID,"token,user_id,is_revoked,expires_at,created_at",TTL 7 dias
+    PasswordResetToken,UUID,"token,user_id,is_used,expires_at,created_at",token de recuperacion de contraseña
+  auth_routes[6]{method,path,auth,description}:
+    POST,/auth/register,none,Crea usuario con rol viewer
+    POST,/auth/login,none,Devuelve access + refresh tokens
+    POST,/auth/refresh,none,Renueva el access token
+    POST,/auth/logout,none,Revoca el refresh token
+    POST,/auth/recover,none,Genera token de recuperación
+    POST,/auth/reset,none,Aplica nueva contraseña
+  users_routes[7]{method,path,auth,description}:
+    GET,/users/me,user,Perfil propio
+    GET,/users/,admin,Lista usuarios
+    GET,/users/{id},admin,Detalle de usuario
+    POST,/users/,admin,Crea usuario
+    PATCH,/users/{id},admin,Actualización parcial
+    PATCH,/users/{id}/restore,admin,Reactiva usuario
+    DELETE,/users/{id},admin,Soft delete
+  sites_routes[6]{method,path,auth,description}:
+    GET,/sites/,user,"admin ve todos; viewer solo los suyos"
+    GET,/sites/{id},user,Detalle (dueño o admin)
+    POST,/sites/,user,Crea sitio del usuario actual
+    PATCH,/sites/{id},user,Edita (dueño o admin)
+    DELETE,/sites/{id},user,Soft delete (dueño o admin)
+    PATCH,/sites/{id}/restore,user,Reactiva sitio
+  proxy_routes[10]{method,path,auth,description}:
+    GET,/proxy/{id}/content/{section},user,Obtiene una sección del sitio
+    GET,/proxy/{id}/colors,user,Obtiene los colores del sitio
+    GET,/proxy/{id}/colors/defaults,user,Colores por defecto
+    GET,/proxy/{id}/logos,user,Obtiene los logos del sitio
+    PUT,/proxy/{id}/content/{section},user,Actualiza la sección y registra historial
+    PUT,/proxy/{id}/colors,user,Actualiza los colores
+    PUT,/proxy/{id}/logos,user,Actualiza los logos
+    DELETE,/proxy/{id}/content/{section},user,Elimina una sección
+    POST,/proxy/{id}/upload,user,Sube un archivo al sitio destino
+    GET,/proxy/{id}/asset,user,Descarga un asset del sitio destino
+  files_routes[3]{method,path,auth,description}:
+    POST,/files/upload/image,user,"imagen png/jpg/svg/webp/gif max 2MB"
+    POST,/files/upload/document,user,"documento pdf/docx max 10MB"
+    POST,/files/upload/media,user,"media mp4/webm max 50MB"
+  other_routes[2]{method,path,auth,description}:
+    GET,/history/{id},user,Historial de cambios paginado
+    GET,/health/,none,Health check
+  migrations[8]: create_users,create_sites,create_refresh_tokens,create_password_reset_tokens,create_change_logs,006_sites_api_token,007_change_logs_indexes,008_sites_icon
+  migrations_note: "8 archivos en alembic/versions/; las nuevas continúan desde 009"
+  auth_flow:
+    login: "POST /auth/login devuelve access_token + refresh_token + token_type"
+    protected_header: "Authorization: Bearer <access_token>"
+    access_ttl: "ACCESS_TOKEN_EXPIRE_MINUTES (default 480 min)"
+    refresh_ttl: "7 días (hardcoded)"
+    refresh: "POST /auth/refresh con refresh_token devuelve nuevo access_token"
+  env[10]{var,purpose}:
+    APP_NAME,Nombre de la aplicación
+    APP_VERSION,Versión de la aplicación
+    DEBUG,Modo debug (false en producción)
+    API_PREFIX,Prefijo de rutas (/api/v1)
+    DATABASE_URL,DSN postgresql+asyncpg
+    SECRET_KEY,Secreto para firmar JWT
+    ALGORITHM,Algoritmo JWT (HS256)
+    ACCESS_TOKEN_EXPIRE_MINUTES,Expiración del access token (default 480)
+    FERNET_KEY,Clave base64 url-safe para encriptar api_token
+    FRONTEND_URL,Origen permitido por CORS
+  conventions[6]:
+    - "Todo es async: usar await y AsyncSession; nunca mezclar Session sync"
+    - "Los servicios son dueños de la BD; las rutas solo orquestan"
+    - "api_token siempre Fernet-encrypted al escribir y nunca en respuestas"
+    - "hashed_password nunca en respuestas"
+    - "Soft delete con is_active=False; nunca borrado físico"
+    - "Roles via require_admin a nivel de router; timestamps naive sin timezone"
+
+frontend:
+  path: frontend/
+  guide: frontend/CLAUDE.md
+  stack:
+    framework: Next.js 15 (App Router)
+    ui: React 19 + TypeScript 5 + Tailwind v4
+    dev_port: 3000
+    docker_host_port: 3001
+    build: "output standalone; eslint.ignoreDuringBuilds true"
+  api_base_env: NEXT_PUBLIC_API_URL
+  shared_design: "lenguaje visual de Rxflow (tokens CSS B/N/gris)"
+  pages[5]{route,access,purpose}:
+    /,user,Redirige al panel
+    /login,public,Login y recuperar/resetear contraseña
+    /sitios,user,Lista y CRUD de sitios
+    /sitios/{id},user,Detalle con tabs Contenido/Colores/Logos/Historial
+    /usuarios,admin,Gestión de usuarios (403 muestra estado restringido)
+  key_modules[6]{file,role}:
+    src/middleware.ts,Protege rutas según la cookie rxpanel_token
+    src/lib/api.ts,Cliente HTTP; extrae errores detail; logout automático en 401
+    src/lib/auth.ts,Token y refresh en localStorage más cookie para el middleware
+    src/store/AuthContext.tsx,Estado de sesión (login/logout/refresh)
+    src/types/api.ts,Tipos espejo de los schemas Pydantic del backend
+    src/components/features/editor/SchemaEditor.tsx,Editor JSON genérico recursivo
+  content_sections[10]: meta,navbar,hero,clients,services,stats,portfolio,testimonials,contact,footer
+  schema_editor: "renderiza cualquier JSON del proxy: objeto→grupo, array→lista reordenable, string→input/textarea/imagen, number→input, boolean→toggle; modo JSON crudo disponible"
+  conventions[6]:
+    - "Cero colores hardcodeados; usar siempre var(--c-*)"
+    - "'use client' solo con hooks, estado o APIs del navegador"
+    - "Mobile-first; las tablas se vuelven cards en móvil"
+    - "Nunca <select> nativo; usar el componente SearchSelect"
+    - "Botones normalizados en ui/Button (primario/ghost/danger)"
+    - "types/api.ts es espejo del backend; sincronizar al cambiar un schema"
+
+integration:
+  flow[4]:
+    - "El frontend autentica en /api/v1/auth/* y guarda el JWT"
+    - "CRUD de usuarios y sitios va directo a /users y /sites"
+    - "Editar contenido NO toca la BD del panel: el frontend llama a /proxy/{id}/... y el backend reenvía al sitio destino usando su api_token"
+    - "Cada PUT vía proxy queda registrado en change_logs (historial)"
+  shared_contract: "frontend/src/types/api.ts refleja los schemas Pydantic del backend"
+
+gotchas[6]:
+  - "bcrypt anclado a <4.0.0: passlib 1.7.4 es incompatible con bcrypt 4.x (login/registro fallan con 500)"
+  - "Migraciones Alembic usan SQL puro (op.execute), no op.create_table() con Enum"
+  - "api_token nunca en respuestas ni logs; siempre Fernet-encrypted"
+  - "Soft delete con is_active=False; nunca borrado físico vía API"
+  - "Timestamps naive en BD (sin timezone); usar replace(tzinfo=None)"
+  - "Frontend sin colores hardcodeados; siempre var(--c-*)"

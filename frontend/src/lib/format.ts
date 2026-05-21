@@ -69,3 +69,16 @@ export function formatDate(iso: string): string {
     return iso;
   }
 }
+
+/** "21 may 2026" — fecha compacta sin hora, para columnas de listado. */
+export function formatDateShort(iso: string): string {
+  try {
+    return new Date(iso).toLocaleDateString("es", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
+  } catch {
+    return iso;
+  }
+}

@@ -2,8 +2,10 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "@/store/AuthContext";
+import { apiGet } from "@/lib/api";
+import type { Site, User } from "@/types/api";
 import ThemeToggle from "./ThemeToggle";
 
 const NAV = [
@@ -40,8 +42,37 @@ export default function Sidebar() {
   const pathname = usePathname();
   const { user, isAdmin, logout } = useAuth();
   const [open, setOpen] = useState(false);
+  const [counts, setCounts] = useState<Record<string, number | undefined>>({});
 
   const links = NAV.filter((n) => !n.adminOnly || isAdmin);
+
+  // Conteos junto a cada enlace. Se refrescan al navegar y cuando una vista
+  // emite "rxpanel:data-changed" tras crear/editar/eliminar.
+  useEffect(() => {
+    let cancelled = false;
+    async function loadCounts() {
+      try {
+        const sites = await apiGet<Site[]>("/sites/");
+        if (!cancelled) setCounts((c) => ({ ...c, "/sitios": sites.length }));
+      } catch {
+        /* el conteo no es crítico: se omite ante un error */
+      }
+      if (isAdmin) {
+        try {
+          const users = await apiGet<User[]>("/users/");
+          if (!cancelled) setCounts((c) => ({ ...c, "/usuarios": users.length }));
+        } catch {
+          /* idem */
+        }
+      }
+    }
+    loadCounts();
+    window.addEventListener("rxpanel:data-changed", loadCounts);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("rxpanel:data-changed", loadCounts);
+    };
+  }, [isAdmin, pathname]);
 
   const content = (
     <>
@@ -50,8 +81,12 @@ export default function Sidebar() {
       </div>
 
       <nav className="flex-1 px-3 flex flex-col gap-1 overflow-y-auto">
+        <p className="px-3 pt-1 pb-1.5 text-[0.6875rem] font-semibold uppercase tracking-[0.08em] text-[var(--c-muted)]">
+          Menú
+        </p>
         {links.map((n) => {
           const active = pathname === n.href || pathname.startsWith(n.href + "/");
+          const count = counts[n.href];
           return (
             <Link
               key={n.href}
@@ -64,7 +99,18 @@ export default function Sidebar() {
               }`}
             >
               <NavIcon paths={n.icon} />
-              {n.label}
+              <span className="flex-1">{n.label}</span>
+              {count !== undefined && (
+                <span
+                  className={`min-w-[1.375rem] text-center text-[0.6875rem] font-semibold px-1.5 py-0.5 rounded-full ${
+                    active
+                      ? "bg-[var(--c-bg)] text-[var(--c-text-sub)]"
+                      : "bg-[var(--c-active-pill)] text-[var(--c-muted)]"
+                  }`}
+                >
+                  {count}
+                </span>
+              )}
             </Link>
           );
         })}

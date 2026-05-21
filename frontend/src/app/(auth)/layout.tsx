@@ -1,6 +1,12 @@
+import ThemeToggle from "@/components/layouts/ThemeToggle";
+
 export default function AuthLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-dvh flex items-center justify-center p-4 bg-[var(--c-bg)]">
+    <div className="relative min-h-dvh bg-[var(--c-bg)]">
+      {/* Cambiar tema desde la propia pantalla de acceso */}
+      <div className="absolute right-4 top-4 z-10">
+        <ThemeToggle />
+      </div>
       {children}
     </div>
   );

@@ -30,7 +30,14 @@ async def _handle_errors(coro):
     except httpx.ConnectTimeout:
         raise HTTPException(status_code=504, detail="El sitio externo no respondió a tiempo (timeout 10s)")
     except httpx.HTTPStatusError as e:
-        raise HTTPException(status_code=e.response.status_code, detail=f"Error del sitio externo: {e.response.text}")
+        upstream = e.response.status_code
+        # 401/403 del sitio destino → 502: es fallo del gateway, no del panel.
+        if upstream in (401, 403):
+            raise HTTPException(
+                status_code=502,
+                detail=f"El sitio externo rechazó la autenticación ({upstream}); revisa el api_token del sitio.",
+            )
+        raise HTTPException(status_code=upstream, detail=f"Error del sitio externo: {e.response.text}")
     except httpx.RequestError as e:
         raise HTTPException(status_code=502, detail=f"No se pudo conectar al sitio externo: {str(e)}")
 
