@@ -1,4 +1,5 @@
 # app/api/routes/proxy.py
+import re
 from fastapi import APIRouter, Depends, File, Query, UploadFile
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,6 +18,11 @@ from app.services.proxy_client import (
 from app.services.change_log_service import log_change
 
 router = APIRouter(prefix="/proxy", tags=["proxy"])
+
+
+def site_origin(site_url: str) -> str:
+    """Strip /api/admin or /api/v1 suffix to get the site's static-file root."""
+    return re.sub(r"/api/(admin|v\d+)/?$", "", site_url.rstrip("/"))
 
 
 # ── GET ───────────────────────────────────────────────────────────────────
@@ -158,9 +164,11 @@ async def get_asset(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Sirve un asset del sitio a través del panel (para previsualización)."""
+    """Sirve un asset del sitio a través del panel (para previsualización).
+    Usa la raíz del sitio (sin /api/admin) para resolver rutas estáticas."""
     site = await site_service.get_by_id(db, site_id, current_user)
-    url = f"{site.url.rstrip('/')}/{path.lstrip('/')}"
+    base = site_origin(site.url)
+    url = f"{base}/{path.lstrip('/')}"
     content, ctype = await proxy_get_bytes(url, site.api_token)
     return Response(
         content=content,

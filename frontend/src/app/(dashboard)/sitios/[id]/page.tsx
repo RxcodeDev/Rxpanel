@@ -13,6 +13,7 @@ import ContentTab from "@/components/features/sites/ContentTab";
 import ColorsTab from "@/components/features/sites/ColorsTab";
 import LogosTab from "@/components/features/sites/LogosTab";
 import HistoryTab from "@/components/features/sites/HistoryTab";
+import { SiteIcon } from "@/lib/siteIcons";
 
 const TABS = ["contenido", "colores", "logos", "historial"] as const;
 type Tab = (typeof TABS)[number];
@@ -84,6 +85,17 @@ export default function SiteDetailPage() {
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <div className="flex items-center gap-3 flex-wrap">
+              {site.icon && (
+                <span
+                  className="inline-flex items-center justify-center w-9 h-9 rounded-xl shrink-0"
+                  style={{
+                    background: "var(--c-bg)",
+                    border: "1px solid var(--c-border)",
+                  }}
+                >
+                  <SiteIcon iconKey={site.icon} color={site.icon_color} size={20} />
+                </span>
+              )}
               <h1 className="text-xl font-bold text-[var(--c-text)] truncate">{site.name}</h1>
               <StatusBadge status={site.status} />
             </div>
@@ -133,7 +145,7 @@ export default function SiteDetailPage() {
 
       <div className="flex-1 min-h-0 overflow-y-auto px-5 md:px-8 py-6">
         <SiteIdProvider siteId={siteId}>
-          {tab === "contenido" && <ContentTab siteId={siteId} />}
+          {tab === "contenido" && <ContentTab siteId={siteId} siteUrl={site.url} />}
           {tab === "colores" && <ColorsTab siteId={siteId} />}
           {tab === "logos" && <LogosTab siteId={siteId} />}
           {tab === "historial" && <HistoryTab siteId={siteId} />}

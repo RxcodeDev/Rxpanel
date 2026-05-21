@@ -25,6 +25,8 @@ export interface Site {
   description: string | null;
   status: SiteStatus;
   is_ssl: boolean;
+  icon: string | null;
+  icon_color: string | null;
   owner_id: string;
   is_active: boolean;
   created_at: string;
@@ -37,6 +39,8 @@ export interface SiteInput {
   description?: string | null;
   status: SiteStatus;
   is_ssl: boolean;
+  icon?: string | null;
+  icon_color?: string | null;
   api_token?: string | null;
 }
 

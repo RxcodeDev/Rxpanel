@@ -46,6 +46,8 @@ async def create(db: AsyncSession, data: SiteCreate, owner_id: uuid.UUID) -> Sit
         description=data.description,
         status=data.status,
         is_ssl=data.is_ssl,
+        icon=data.icon,
+        icon_color=data.icon_color,
         api_token=encrypted_token,
         owner_id=owner_id,
         is_active=True,

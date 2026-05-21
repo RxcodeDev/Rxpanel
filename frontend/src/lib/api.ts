@@ -1,7 +1,7 @@
 import { getToken, clearAuth } from "./auth";
 
-export const BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api/v1";
+const _apiHost = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+export const BASE_URL = `${_apiHost.replace(/\/$/, "")}/api/v1`;
 
 export class ApiError extends Error {
   constructor(public readonly status: number, message: string) {

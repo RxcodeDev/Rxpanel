@@ -11,6 +11,8 @@ class SiteBase(BaseModel):
     description: str | None = None
     status: SiteStatus = SiteStatus.active
     is_ssl: bool = False
+    icon: str | None = None
+    icon_color: str | None = None
 
 
 class SiteCreate(SiteBase):
@@ -24,6 +26,8 @@ class SiteUpdate(BaseModel):
     status: SiteStatus | None = None
     is_ssl: bool | None = None
     api_token: str | None = None          # si viene, se re-encripta
+    icon: str | None = None
+    icon_color: str | None = None
 
 
 class SiteRead(SiteBase):

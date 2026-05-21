@@ -13,20 +13,11 @@ app = FastAPI(
     debug=settings.DEBUG,
 )
 
-# CORS — acepta el frontend y permite cualquier puerto local en desarrollo
-origins = [settings.FRONTEND_URL]
-if settings.DEBUG:
-    origins += [
-        "http://localhost:3000",
-        "http://localhost:3001",
-        "http://localhost:5173",
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:3001",
-    ]
-
+# CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=[settings.FRONTEND_URL],
+    allow_origin_regex=r"http://(localhost|127\.0\.0\.1)(:\d+)?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

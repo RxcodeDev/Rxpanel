@@ -3,18 +3,24 @@ import { InputHTMLAttributes, ReactNode } from "react";
 interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   label?: string;
   icon?: ReactNode;
+  labelIcon?: ReactNode;
   error?: string;
   hint?: string;
 }
 
-export default function Input({ label, icon, error, hint, id, className, ...props }: InputProps) {
+export default function Input({ label, icon, labelIcon, error, hint, id, className, ...props }: InputProps) {
   return (
     <div className="flex flex-col gap-[0.375rem]">
       {label && (
         <label
           htmlFor={id}
-          className="text-[0.75rem] font-semibold text-[var(--c-text-sub)] tracking-[0.02em]"
+          className="flex items-center gap-1.5 text-[0.75rem] font-semibold text-[var(--c-text-sub)] tracking-[0.02em]"
         >
+          {labelIcon && (
+            <span className="inline-flex items-center text-[var(--c-muted)] [&_svg]:w-3.5 [&_svg]:h-3.5">
+              {labelIcon}
+            </span>
+          )}
           {label}
         </label>
       )}

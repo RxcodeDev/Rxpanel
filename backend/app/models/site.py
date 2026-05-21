@@ -28,6 +28,10 @@ class Site(Base):
     # Token de API encriptado con Fernet
     api_token: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Apariencia: icono (clave del set predefinido) y color hex
+    icon: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    icon_color: Mapped[str | None] = mapped_column(String(16), nullable=True)
+
     # Soft delete
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
