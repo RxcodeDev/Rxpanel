@@ -1,0 +1,88 @@
+# =====================================================================
+# Rxpanel — Docker Compose para PRODUCCIÓN (con Traefik)
+# Uso: docker compose -f docker-compose.prod.yml up -d --build
+#
+# Requiere que Traefik ya esté corriendo con la red "traefik-public".
+#
+# Diferencias vs docker-compose.yml (local):
+#  - Sin bind mounts de código fuente (no hot reload)
+#  - Frontend construido con el stage "runner" (Next.js standalone)
+#  - DB sólo accesible en red interna
+#  - Traefik maneja SSL vía Let's Encrypt y enruta por dominio/path
+#  - Volumen persistente para uploads del backend
+# =====================================================================
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: rxpanel_db
+    env_file: .env
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - rxpanel-internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: rxpanel_backend
+    env_file: .env
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}"
+    volumes:
+      - backend_uploads:/app/uploads
+    networks:
+      - rxpanel-internal
+      - traefik-public
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-public"
+      # Rutas del backend: /api/ y /uploads/
+      - "traefik.http.routers.rxpanel-api.rule=Host(`rxpanel.rxcode.com.mx`) && (PathPrefix(`/api/`) || PathPrefix(`/uploads/`))"
+      - "traefik.http.routers.rxpanel-api.entrypoints=websecure"
+      - "traefik.http.routers.rxpanel-api.tls.certresolver=letsencrypt"
+      - "traefik.http.services.rxpanel-api.loadbalancer.server.port=8000"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: runner
+      args:
+        # Baked in at build time — debe coincidir con el dominio público
+        NEXT_PUBLIC_API_URL: https://rxpanel.rxcode.com.mx
+    container_name: rxpanel_frontend
+    env_file: .env
+    networks:
+      - traefik-public
+    depends_on:
+      - backend
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-public"
+      - "traefik.http.routers.rxpanel.rule=Host(`rxpanel.rxcode.com.mx`)"
+      - "traefik.http.routers.rxpanel.entrypoints=websecure"
+      - "traefik.http.routers.rxpanel.tls.certresolver=letsencrypt"
+      - "traefik.http.services.rxpanel.loadbalancer.server.port=3000"
+
+networks:
+  rxpanel-internal:
+    driver: bridge
+  traefik-public:
+    external: true
+
+volumes:
+  postgres_data:
+  backend_uploads:
