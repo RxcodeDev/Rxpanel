@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useRef, useState } from "react";
+import React, { useContext, useEffect, useRef, useState } from "react";
 import type { JsonValue } from "@/types/api";
 import { humanize, looksLikeImage, resolveAsset, fieldHint } from "@/lib/format";
 import Input from "@/components/ui/Input";
@@ -54,6 +54,21 @@ function itemThumbnail(item: JsonValue): string | null {
   }
   return null;
 }
+
+/** True si `k` es un campo dependiente de un toggle apagado: existe una clave
+ *  booleana hermana en `false` de la que `k` es prefijo-extensión. Ej.: con
+ *  customInput=false se ocultan customInputLabel y customInputPlaceholder. */
+function isHiddenByToggle(k: string, obj: { [key: string]: JsonValue }): boolean {
+  return Object.keys(obj).some(
+    (b) => b !== k && obj[b] === false && k.startsWith(b)
+  );
+}
+
+/* ── Catálogo de servicios ──────────────────────────────────── */
+/* Un objeto con la clave `serviceCatalog` (lista de strings) expone esa lista
+   a sus descendientes; los campos `services` anidados la usan para que el
+   usuario seleccione en vez de escribir. */
+const ServiceCatalogContext = React.createContext<string[]>([]);
 
 /* ── Icono contextual por clave de campo ────────────────────── */
 
@@ -179,6 +194,62 @@ function FieldIcon({ fieldKey }: { fieldKey: string }) {
   return null;
 }
 
+/* ── Icon picker ─────────────────────────────────────────────── */
+
+const ICON_OPTIONS: { key: string; label: string; paths: React.ReactNode }[] = [
+  { key: "users",     label: "Personas",     paths: <><circle cx="7" cy="6" r="2.5" stroke="currentColor" strokeWidth="1.6"/><path d="M1 17c0-3 2.5-5 6-5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/><circle cx="13" cy="6" r="2.5" stroke="currentColor" strokeWidth="1.6"/><path d="M13 12c3.5 0 6 2 6 5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></> },
+  { key: "calendar",  label: "Calendario",   paths: <><rect x="2" y="4" width="16" height="13" rx="2" stroke="currentColor" strokeWidth="1.6"/><path d="M6 2v4M14 2v4M2 9h16" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></> },
+  { key: "star",      label: "Estrella",     paths: <path d="M10 2l2 4.9 5.4.8-3.9 3.8.9 5.3L10 14.2l-4.8 2.6.9-5.3L2.2 7.7l5.4-.8L10 2z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round"/> },
+  { key: "smile",     label: "Satisfacción", paths: <><circle cx="10" cy="10" r="8" stroke="currentColor" strokeWidth="1.6"/><path d="M7 12.5s1.2 1.5 3 1.5 3-1.5 3-1.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/><circle cx="7.5" cy="8.5" r="1" fill="currentColor"/><circle cx="12.5" cy="8.5" r="1" fill="currentColor"/></> },
+  { key: "chart",     label: "Crecimiento",  paths: <><rect x="2" y="12" width="4" height="5" rx="1" stroke="currentColor" strokeWidth="1.6"/><rect x="8" y="8" width="4" height="9" rx="1" stroke="currentColor" strokeWidth="1.6"/><rect x="14" y="4" width="4" height="13" rx="1" stroke="currentColor" strokeWidth="1.6"/></> },
+  { key: "briefcase", label: "Negocios",     paths: <><rect x="2" y="7" width="16" height="10" rx="2" stroke="currentColor" strokeWidth="1.6"/><path d="M7 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2" stroke="currentColor" strokeWidth="1.6"/><path d="M2 12h16" stroke="currentColor" strokeWidth="1.6"/></> },
+  { key: "target",    label: "Objetivo",    paths: <><circle cx="10" cy="10" r="8" stroke="currentColor" strokeWidth="1.6"/><circle cx="10" cy="10" r="4" stroke="currentColor" strokeWidth="1.6"/><circle cx="10" cy="10" r="1.5" fill="currentColor"/></> },
+  { key: "award",     label: "Premio",      paths: <><circle cx="10" cy="7" r="5" stroke="currentColor" strokeWidth="1.6"/><path d="M6.5 11.5L5 18l5-3 5 3-1.5-6.5" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round"/></> },
+  { key: "rocket",    label: "Lanzamiento", paths: <path d="M10 2s4 1 5.5 6L12 12H8L4.5 8C6 3 10 2 10 2z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round"/> },
+  { key: "globe",     label: "Global",      paths: <><circle cx="10" cy="10" r="8" stroke="currentColor" strokeWidth="1.6"/><path d="M2 10h16M10 2a14 14 0 0 1 0 16M10 2a14 14 0 0 0 0 16" stroke="currentColor" strokeWidth="1.6"/></> },
+  { key: "heart",     label: "Compromiso",  paths: <path d="M10 16s-7-4-7-9a4 4 0 0 1 7-2.5A4 4 0 0 1 17 7c0 5-7 9-7 9z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round"/> },
+  { key: "lightning", label: "Velocidad",   paths: <path d="M12 2L6 11h5l-3 7 9-10h-5l3-6z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round"/> },
+];
+
+function IconPickerField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: JsonValue) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <span className="text-[0.75rem] font-semibold text-[var(--c-text-sub)] tracking-[0.02em]">{label}</span>
+      <div className="flex flex-wrap gap-1">
+        {ICON_OPTIONS.map(({ key, label: iconLabel, paths }) => {
+          const selected = value === key;
+          return (
+            <button
+              key={key}
+              type="button"
+              onClick={() => onChange(key)}
+              title={iconLabel}
+              className="w-7 h-7 flex items-center justify-center rounded-md transition-colors cursor-pointer"
+              style={
+                selected
+                  ? { border: "2px solid var(--c-text)", background: "var(--c-active-pill)", color: "var(--c-text)" }
+                  : { border: "1px solid var(--c-border)", background: "transparent", color: "var(--c-muted)" }
+              }
+            >
+              <svg viewBox="0 0 20 20" fill="none" width="16" height="16" aria-hidden="true">
+                {paths}
+              </svg>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 /* ── Primitivo ──────────────────────────────────────────────── */
 
 function PrimitiveField({
@@ -197,7 +268,7 @@ function PrimitiveField({
   if (typeof value === "boolean") {
     return (
       <div className="py-1">
-        <Toggle checked={value} onChange={onChange} label={label} description={hint} />
+        <Toggle checked={value} onChange={onChange} label={label} description={hint} compact />
       </div>
     );
   }
@@ -215,6 +286,42 @@ function PrimitiveField({
   }
 
   const str = value ?? "";
+
+  if (/^icon$/i.test(fieldKey)) {
+    return <IconPickerField label={label} value={str} onChange={onChange} />;
+  }
+
+  /* ── Select fields with fixed options ── */
+  const SELECT_OPTIONS: Record<string, { value: string; label: string }[]> = {
+    orientation: [
+      { value: "horizontal", label: "Horizontal" },
+      { value: "vertical",   label: "Vertical"   },
+    ],
+  };
+  if (fieldKey in SELECT_OPTIONS) {
+    const options = SELECT_OPTIONS[fieldKey];
+    return (
+      <div className="flex flex-col gap-1.5">
+        <span className="text-[0.75rem] font-semibold text-[var(--c-text-sub)] tracking-[0.02em]">{label}</span>
+        {hint && <span className="text-[0.7rem] text-[var(--c-muted)]">{hint}</span>}
+        <select
+          value={str}
+          onChange={(e) => onChange(e.target.value)}
+          className="rounded-lg px-3 py-1.5 text-sm outline-none transition-colors"
+          style={{
+            border: "1px solid var(--c-border)",
+            background: "var(--c-surface)",
+            color: "var(--c-text)",
+            cursor: "pointer",
+          }}
+        >
+          {options.map((o) => (
+            <option key={o.value} value={o.value}>{o.label}</option>
+          ))}
+        </select>
+      </div>
+    );
+  }
 
   if (looksLikeImage(fieldKey, str)) {
     return <ImageField label={label} value={str} onChange={onChange} />;
@@ -390,27 +497,251 @@ function PillArrayEditor({
   );
 }
 
+/* ── Catalog Pill (selección de servicios desde un catálogo) ──── */
+
+function CatalogPillEditor({
+  label,
+  value,
+  catalog,
+  onChange,
+}: {
+  label: string;
+  value: JsonValue[];
+  catalog: string[];
+  onChange: (v: JsonValue) => void;
+}) {
+  const [open, setOpen] = useState(false);
+
+  const selected = value.map(String);
+  const available = catalog.filter((c) => !selected.includes(c));
+
+  function add(item: string) {
+    onChange([...value, item]);
+  }
+  function remove(i: number) {
+    onChange(value.filter((_, idx) => idx !== i));
+  }
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-center justify-between">
+        <span className="text-[0.75rem] font-semibold text-[var(--c-text-sub)] tracking-[0.02em]">
+          {label}{" "}
+          <span className="text-[var(--c-muted)] font-normal">({value.length})</span>
+        </span>
+
+        {/* Add button + floating popover con las opciones del catálogo */}
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setOpen((o) => !o)}
+            className="inline-flex items-center gap-1 text-[0.72rem] font-medium px-1.5 py-0.5 rounded text-[var(--c-muted)] hover:text-[var(--c-text)] hover:bg-[var(--c-hover)] transition-colors cursor-pointer bg-transparent border-none"
+          >
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden="true">
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+            Añadir
+          </button>
+
+          {open && (
+            <>
+              {/* backdrop */}
+              <div className="fixed inset-0" onClick={() => setOpen(false)} style={{ zIndex: 9998 }} />
+              {/* popover */}
+              <div
+                className="absolute right-0 top-full mt-1.5 rounded-[0.75rem] p-1.5 flex flex-col gap-0.5 max-h-64 overflow-y-auto"
+                style={{ zIndex: 9999, background: "var(--c-bg)", border: "1px solid var(--c-border)", minWidth: 240, boxShadow: "0 12px 32px rgba(0,0,0,0.18)" }}
+              >
+                {available.length === 0 ? (
+                  <p className="text-[0.8125rem] text-[var(--c-muted)] italic px-2 py-1.5">
+                    {catalog.length === 0
+                      ? "Define primero el catálogo de servicios"
+                      : "Todos los servicios añadidos"}
+                  </p>
+                ) : (
+                  available.map((item) => (
+                    <button
+                      key={item}
+                      type="button"
+                      onClick={() => add(item)}
+                      className="text-left text-[0.8125rem] px-2 py-1.5 rounded-md text-[var(--c-text)] hover:bg-[var(--c-hover)] cursor-pointer bg-transparent border-none transition-colors"
+                    >
+                      {item}
+                    </button>
+                  ))
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Pills seleccionadas */}
+      {value.length === 0 ? (
+        <p className="text-[0.8125rem] text-[var(--c-muted)] italic">Sin servicios</p>
+      ) : (
+        <div className="flex flex-wrap gap-1.5">
+          {value.map((item, i) => {
+            const inCatalog = catalog.includes(String(item));
+            return (
+              <span
+                key={i}
+                className="inline-flex items-center gap-1 px-2.5 py-[3px] rounded-full text-[0.78rem] font-medium leading-none select-none"
+                style={
+                  inCatalog
+                    ? PILL_PALETTES[i % PILL_PALETTES.length]
+                    : { background: "var(--c-hover)", border: "1px dashed var(--c-border)", color: "var(--c-muted)" }
+                }
+                title={inCatalog ? undefined : "Este servicio ya no está en el catálogo"}
+              >
+                {String(item)}
+                <button
+                  type="button"
+                  onClick={() => remove(i)}
+                  className="w-3 h-3 flex items-center justify-center rounded-full cursor-pointer opacity-40 hover:opacity-90 transition-opacity shrink-0"
+                  aria-label="Eliminar"
+                >
+                  <svg width="7" height="7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" aria-hidden="true">
+                    <path d="M18 6L6 18M6 6l12 12" />
+                  </svg>
+                </button>
+              </span>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── Headline editor (2 inputs: texto principal + palabra acento) ─ */
+
+function HeadlineEditor({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: JsonValue[];
+  onChange: (v: JsonValue) => void;
+}) {
+  const main = value.slice(0, -1).map(String).join(" ");
+  const accent = value.length > 0 ? String(value[value.length - 1]) : "";
+
+  return (
+    <div className="flex flex-col gap-3">
+      <span className="text-[0.75rem] font-semibold text-[var(--c-text-sub)] tracking-[0.02em]">{label}</span>
+      <Input
+        label="Texto principal"
+        value={main}
+        onChange={(e) => onChange([e.target.value, accent])}
+      />
+      <Input
+        label="Acento"
+        value={accent}
+        onChange={(e) => onChange([main, e.target.value])}
+      />
+    </div>
+  );
+}
+
 /* ── Array ──────────────────────────────────────────────────── */
 
 function ArrayEditor({
+  fieldKey,
   label,
   value,
   onChange,
   depth,
 }: {
+  fieldKey: string;
   label: string;
   value: JsonValue[];
   onChange: (v: JsonValue) => void;
   depth: number;
 }) {
-  const isPrimitiveArray = value.length === 0 || value.every(
-    (v) => typeof v === "string" || typeof v === "number" || typeof v === "boolean"
-  );
-  if (isPrimitiveArray) {
+  // Dispatcher: elige el editor según el contenido. Llama un único hook
+  // (useContext), siempre — así nunca cambia su secuencia de hooks. Los
+  // editores hijos son componentes propios con su propio juego de hooks.
+  const serviceCatalog = useContext(ServiceCatalogContext);
+
+  // El catálogo de servicios es siempre una lista de texto libre.
+  if (fieldKey === "serviceCatalog") {
     return <PillArrayEditor label={label} value={value} onChange={onChange} />;
   }
 
-  const [collapsed, setCollapsed] = useState<Record<number, boolean>>({});
+  // Los servicios de un rango se eligen siempre del catálogo (su fuente de verdad).
+  if (fieldKey === "services") {
+    return <CatalogPillEditor label={label} value={value} catalog={serviceCatalog} onChange={onChange} />;
+  }
+
+  const isPrimitiveArray = value.length > 0 && value.every(
+    (v) => typeof v === "string" || typeof v === "number" || typeof v === "boolean"
+  );
+  if (isPrimitiveArray) {
+    if (/^head(line|ing)$/i.test(fieldKey)) {
+      return <HeadlineEditor label={label} value={value} onChange={onChange} />;
+    }
+    return <PillArrayEditor label={label} value={value} onChange={onChange} />;
+  }
+
+  return (
+    <ObjectArrayEditor
+      fieldKey={fieldKey}
+      label={label}
+      value={value}
+      onChange={onChange}
+      depth={depth}
+    />
+  );
+}
+
+/* ── Object Array (listas de objetos) ───────────────────────── */
+
+function ObjectArrayEditor({
+  fieldKey,
+  label,
+  value,
+  onChange,
+  depth,
+}: {
+  fieldKey: string;
+  label: string;
+  value: JsonValue[];
+  onChange: (v: JsonValue) => void;
+  depth: number;
+}) {
+  const KNOWN_TEMPLATES: Record<string, JsonValue> = {
+    websites: { url: "https://", screenshot: "", client: "", category: "Sitio Web", desc: "" },
+    photos:   { img: "", client: "", category: "", desc: "" },
+    videos:   { src: "", poster: "", client: "", category: "", desc: "", duration: "0:00", featured: false, tagline: "", orientation: "horizontal" },
+    items:    { title: "", description: "", detail: "", image: "" },
+    budgetTiers: { label: "", services: [], customInput: false, customInputLabel: "", customInputPlaceholder: "" },
+  };
+
+  const lastItemRef = useRef<HTMLDivElement>(null);
+  const prevLenRef = useRef(value.length);
+  const storageKey = `array-template:${label}`;
+  const lastRemovedRef = useRef<JsonValue | null>(null);
+  // Init lastRemovedRef from sessionStorage on mount (useRef doesn't support lazy initializers)
+  useEffect(() => {
+    if (lastRemovedRef.current === null) {
+      try { const s = sessionStorage.getItem(storageKey); if (s) lastRemovedRef.current = JSON.parse(s); } catch { /* ignore */ }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    if (value.length > prevLenRef.current && lastItemRef.current) {
+      lastItemRef.current.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+    prevLenRef.current = value.length;
+  }, [value.length]);
+  // Keep sessionStorage template in sync whenever array has items
+  useEffect(() => {
+    if (value.length > 0) {
+      try { sessionStorage.setItem(storageKey, JSON.stringify(value[value.length - 1])); } catch { /* ignore */ }
+    }
+  }, [value, storageKey]);
 
   function update(i: number, v: JsonValue) {
     const next = value.slice();
@@ -418,22 +749,21 @@ function ArrayEditor({
     onChange(next);
   }
   function remove(i: number) {
+    lastRemovedRef.current = value[i];
+    try { sessionStorage.setItem(storageKey, JSON.stringify(value[i])); } catch { /* ignore */ }
     onChange(value.filter((_, idx) => idx !== i));
   }
-  function move(i: number, dir: -1 | 1) {
-    const j = i + dir;
-    if (j < 0 || j >= value.length) return;
-    const next = value.slice();
-    [next[i], next[j]] = [next[j], next[i]];
-    onChange(next);
-  }
   function add() {
-    const template = value.length ? emptyLike(value[value.length - 1]) : "";
+    const sample = value.length ? value[value.length - 1] : lastRemovedRef.current;
+    // sample must be a plain object or primitive JsonValue — never a function (useRef lazy init bug guard)
+    const validSample = sample !== null && typeof sample !== "function" ? sample : null;
+    const template = validSample ? emptyLike(validSample) : (fieldKey in KNOWN_TEMPLATES ? emptyLike(KNOWN_TEMPLATES[fieldKey]) : {});
     onChange([...value, template]);
   }
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-2">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <span className="text-[0.75rem] font-semibold text-[var(--c-text-sub)] tracking-[0.02em]">
           {label}{" "}
@@ -442,112 +772,61 @@ function ArrayEditor({
         <button
           type="button"
           onClick={add}
-          className="inline-flex items-center gap-1 text-[0.75rem] font-medium px-2.5 py-1 rounded-md border border-[var(--c-border)] text-[var(--c-text-sub)] hover:border-[var(--c-text-sub)] hover:text-[var(--c-text)] transition-colors cursor-pointer bg-transparent"
+          className="inline-flex items-center gap-1 text-[0.72rem] font-medium px-1.5 py-0.5 rounded text-[var(--c-muted)] hover:text-[var(--c-text)] hover:bg-[var(--c-hover)] transition-colors cursor-pointer bg-transparent border-none"
         >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-            strokeWidth="2.5" strokeLinecap="round" aria-hidden="true">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden="true">
             <path d="M12 5v14M5 12h14" />
           </svg>
           Añadir
         </button>
       </div>
 
-      {value.length === 0 && (
-        <p className="text-[0.8125rem] text-[var(--c-muted)] py-3 text-center border border-dashed border-[var(--c-border)] rounded-[0.75rem]">
-          Lista vacía — pulsa «Añadir» para crear el primer elemento.
-        </p>
-      )}
+      {/* Items */}
+      <div className="flex flex-col gap-2">
+        {value.length === 0 ? (
+          <p className="text-[0.8125rem] text-[var(--c-muted)] py-3 text-center italic">
+            Sin elementos
+          </p>
+        ) : (
+          value.map((item, i) => {
+            const itemObj = isPlainObject(item) ? item as { [k: string]: JsonValue } : null;
+            const imageKeys = itemObj
+              ? Object.keys(itemObj).filter(k => !/^icon$/i.test(k) && typeof itemObj[k] === "string" && looksLikeImage(k, itemObj[k] as string))
+              : [];
+            const otherKeys = itemObj
+              ? Object.keys(itemObj).filter(
+                  (k) => !imageKeys.includes(k) && !isHiddenByToggle(k, itemObj)
+                )
+              : [];
 
-      {/* Card grid — multiple cards per row */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: "1rem", alignItems: "start" }}>
-        {value.map((item, i) => {
-          const complex = Array.isArray(item) || isPlainObject(item);
-          const isCollapsed = collapsed[i];
-          const preview = itemPreviewLabel(item);
-
-          const itemObj = isPlainObject(item) ? item as { [k: string]: JsonValue } : null;
-          const imageKeys = itemObj
-            ? Object.keys(itemObj).filter(k => typeof itemObj[k] === "string" && looksLikeImage(k, itemObj[k] as string))
-            : [];
-          const otherKeys = itemObj ? Object.keys(itemObj).filter(k => !imageKeys.includes(k)) : [];
-          const hasImages = imageKeys.length > 0;
-
-          return (
-            <div
-              key={i}
-              className="rounded-xl overflow-hidden flex flex-col"
-              style={{ border: "1px solid var(--c-border)", boxShadow: "0 2px 10px rgba(0,0,0,0.08)" }}
-            >
-              {/* Card header */}
+            return (
               <div
-                className="flex items-center gap-2 px-3 py-2"
-                style={{ background: "var(--c-hover)", borderBottom: "1px solid var(--c-border)" }}
+                key={i}
+                ref={i === value.length - 1 ? lastItemRef : undefined}
+                className="relative px-2.5 py-2 pr-9 rounded-lg"
+                style={{ border: "1px solid var(--c-border)" }}
               >
-                <span
-                  className="shrink-0 w-5 h-5 flex items-center justify-center rounded text-[0.65rem] font-bold tabular-nums"
-                  style={{ background: "var(--c-active-pill)", color: "var(--c-muted)" }}
+                <button
+                  type="button"
+                  onClick={() => remove(i)}
+                  className="absolute top-1.5 right-1.5 w-6 h-6 flex items-center justify-center rounded-md text-[var(--c-muted)] hover:text-[var(--c-danger)] hover:bg-[var(--c-st-error-bg)] cursor-pointer transition-colors"
+                  aria-label="Eliminar"
                 >
-                  {i + 1}
-                </span>
-                <span className="text-[0.8125rem] font-medium text-[var(--c-text)] truncate flex-1 min-w-0">
-                  {preview || <span className="text-[var(--c-muted)] font-normal italic">Elemento {i + 1}</span>}
-                </span>
-                <div className="flex items-center gap-0.5 shrink-0">
-                  {complex && (
-                    <button
-                      type="button"
-                      onClick={() => setCollapsed((c) => ({ ...c, [i]: !c[i] }))}
-                      className="w-6 h-6 flex items-center justify-center rounded text-[var(--c-muted)] hover:text-[var(--c-text)] cursor-pointer transition-all"
-                      style={{ transform: isCollapsed ? "rotate(-90deg)" : "none" }}
-                      aria-label={isCollapsed ? "Expandir" : "Plegar"}
-                    >
-                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden="true">
-                        <path d="M2 4l4 4 4-4" />
-                      </svg>
-                    </button>
-                  )}
-                  <button type="button" onClick={() => move(i, -1)} disabled={i === 0}
-                    className="w-6 h-6 flex items-center justify-center rounded text-[var(--c-muted)] hover:text-[var(--c-text)] disabled:opacity-25 cursor-pointer disabled:cursor-not-allowed transition-colors"
-                    aria-label="Subir">
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                      <path d="M18 15l-6-6-6 6" />
-                    </svg>
-                  </button>
-                  <button type="button" onClick={() => move(i, 1)} disabled={i === value.length - 1}
-                    className="w-6 h-6 flex items-center justify-center rounded text-[var(--c-muted)] hover:text-[var(--c-text)] disabled:opacity-25 cursor-pointer disabled:cursor-not-allowed transition-colors"
-                    aria-label="Bajar">
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                      <path d="M6 9l6 6 6-6" />
-                    </svg>
-                  </button>
-                  <button type="button" onClick={() => remove(i)}
-                    className="w-6 h-6 flex items-center justify-center rounded text-[var(--c-danger)] hover:bg-[var(--c-st-error-bg)] cursor-pointer transition-colors"
-                    aria-label="Eliminar">
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                      <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-                    </svg>
-                  </button>
-                </div>
-              </div>
-
-              {/* Card body — single column: image(s) stacked on top, fields below */}
-              {!isCollapsed && (
-                itemObj && hasImages ? (
-                  <div className="flex flex-col flex-1">
-                    {/* Image area */}
-                    <div className="flex flex-col" style={{ borderBottom: "1px solid var(--c-border)" }}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                  </svg>
+                </button>
+                <div className="flex flex-col gap-2">
+                  {itemObj ? (
+                    <>
                       {imageKeys.map(k => (
                         <ImageField
                           key={k}
                           label={humanize(k)}
                           value={itemObj[k] as string}
-                          layout="card"
                           onChange={v => update(i, { ...itemObj, [k]: v })}
                         />
                       ))}
-                    </div>
-                    {/* Fields below */}
-                    <div className="p-4 flex flex-col gap-3">
                       {otherKeys.map(k => (
                         <SchemaEditor
                           key={k}
@@ -557,23 +836,21 @@ function ArrayEditor({
                           depth={depth + 1}
                         />
                       ))}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="p-4">
+                    </>
+                  ) : (
                     <SchemaEditor
-                      fieldKey={label}
+                      fieldKey={fieldKey}
                       label=""
                       value={item}
-                      onChange={(v) => update(i, v)}
+                      onChange={v => update(i, v)}
                       depth={depth + 1}
                     />
-                  </div>
-                )
-              )}
-            </div>
-          );
-        })}
+                  )}
+                </div>
+              </div>
+            );
+          })
+        )}
       </div>
     </div>
   );
@@ -598,12 +875,47 @@ export default function SchemaEditor({
 
   if (Array.isArray(value)) {
     return (
-      <ArrayEditor label={displayLabel} value={value} onChange={onChange} depth={depth} />
+      <ArrayEditor fieldKey={fieldKey} label={displayLabel} value={value} onChange={onChange} depth={depth} />
     );
   }
 
   if (isPlainObject(value)) {
     const keys = Object.keys(value);
+
+    /* Si el objeto define `serviceCatalog`, lo expone a los hijos vía contexto. */
+    const scRaw = value["serviceCatalog"];
+    const serviceCatalog =
+      Array.isArray(scRaw) && scRaw.every((x) => typeof x === "string")
+        ? (scRaw as string[])
+        : null;
+    const wrap = (node: React.ReactNode): React.ReactNode =>
+      serviceCatalog ? (
+        <ServiceCatalogContext.Provider value={serviceCatalog}>
+          {node}
+        </ServiceCatalogContext.Provider>
+      ) : (
+        node
+      );
+
+    /* Aplica el cambio de un campo hijo. Si cambia `serviceCatalog`, poda los
+       servicios de cada rango que ya no estén en el catálogo: el catálogo es
+       la fuente de verdad. */
+    const commitChild = (k: string, v: JsonValue) => {
+      if (k === "serviceCatalog" && Array.isArray(v)) {
+        const allowed = new Set(v.map(String));
+        const tiers = value["budgetTiers"];
+        if (Array.isArray(tiers)) {
+          const prunedTiers = tiers.map((t) =>
+            isPlainObject(t) && Array.isArray(t["services"])
+              ? { ...t, services: (t["services"] as JsonValue[]).filter((s) => allowed.has(String(s))) }
+              : t
+          );
+          onChange({ ...value, serviceCatalog: v, budgetTiers: prunedTiers });
+          return;
+        }
+      }
+      onChange({ ...value, [k]: v });
+    };
 
     /* Render a single child by key, applying the inline/full-width grid rules. */
     const renderChild = (k: string) => {
@@ -620,7 +932,7 @@ export default function SchemaEditor({
           <SchemaEditor
             fieldKey={k}
             value={childVal}
-            onChange={(v) => onChange({ ...value, [k]: v })}
+            onChange={(v) => commitChild(k, v)}
             depth={depth + 1}
           />
         </div>
@@ -641,7 +953,7 @@ export default function SchemaEditor({
       const mainKeys = keys.filter((k) => !imageKeys.includes(k) && !secondaryKeys.includes(k));
 
       if (imageKeys.length > 0 && mainKeys.length > 0) {
-        return (
+        return wrap(
           <div className="flex flex-col gap-4">
             {/* Top: image sidebar + main content side by side */}
             <div
@@ -712,7 +1024,7 @@ export default function SchemaEditor({
       }
     }
 
-    return (
+    return wrap(
       <div
         style={{
           display: "grid",

@@ -1,10 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { apiGet, apiDelete, ApiError } from "@/lib/api";
+import { apiGet, apiDelete, apiPatch, ApiError } from "@/lib/api";
 import { useToast } from "@/components/ui/Toast";
 import { useAuth } from "@/store/AuthContext";
-import type { User } from "@/types/api";
+import type { User, Company } from "@/types/api";
 import Button from "@/components/ui/Button";
 import Spinner from "@/components/ui/Spinner";
 import ConfirmModal from "@/components/ui/ConfirmModal";
@@ -12,8 +12,10 @@ import UserFormModal from "@/components/features/users/UserFormModal";
 
 export default function UsersPage() {
   const toast = useToast();
-  const { user: me } = useAuth();
+  const { user: me, isAdmin, isCompanyAdmin } = useAuth();
   const [users, setUsers] = useState<User[]>([]);
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [myCompanyName, setMyCompanyName] = useState<string>("Mi empresa");
   const [loading, setLoading] = useState(true);
   const [forbidden, setForbidden] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
@@ -21,10 +23,26 @@ export default function UsersPage() {
   const [toDelete, setToDelete] = useState<User | null>(null);
   const [deleting, setDeleting] = useState(false);
 
+  const canManage = isAdmin || isCompanyAdmin;
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      setUsers(await apiGet<User[]>("/users/"));
+      const [usersData, companiesData] = await Promise.all([
+        apiGet<User[]>("/users/"),
+        isAdmin ? apiGet<Company[]>("/companies/") : Promise.resolve([] as Company[]),
+      ]);
+      setUsers(usersData);
+      setCompanies(companiesData);
+      // Para company_admin: obtener el nombre de su empresa
+      if (!isAdmin && isCompanyAdmin) {
+        try {
+          const myCompany = await apiGet<Company>("/companies/me");
+          setMyCompanyName(myCompany.name);
+        } catch {
+          setMyCompanyName("Mi empresa");
+        }
+      }
       setForbidden(false);
     } catch (e) {
       if (e instanceof ApiError && e.status === 403) setForbidden(true);
@@ -32,7 +50,8 @@ export default function UsersPage() {
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin, isCompanyAdmin]);
 
   useEffect(() => {
     load();
@@ -43,14 +62,249 @@ export default function UsersPage() {
     setDeleting(true);
     try {
       await apiDelete(`/users/${toDelete.id}`);
+      // Quitar inmediatamente del estado local
+      setUsers((prev) => prev.filter((u) => u.id !== toDelete.id));
       toast.success("Usuario eliminado.");
       setToDelete(null);
-      load();
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "No se pudo eliminar.");
     } finally {
       setDeleting(false);
     }
+  }
+
+  async function toggleActive(u: User) {
+    // Actualiza optimistamente para respuesta instantánea
+    setUsers((prev) => prev.map((x) => (x.id === u.id ? { ...x, is_active: !u.is_active } : x)));
+    try {
+      if (u.is_active) {
+        // Desactivar — PATCH regular
+        await apiPatch(`/users/${u.id}`, { is_active: false });
+        toast.success("Cuenta desactivada.");
+      } else {
+        // Reactivar — endpoint dedicado
+        await apiPatch(`/users/${u.id}/restore`, {});
+        toast.success("Cuenta activada.");
+      }
+    } catch (e) {
+      // Revertir si falla
+      setUsers((prev) => prev.map((x) => (x.id === u.id ? { ...x, is_active: u.is_active } : x)));
+      toast.error(e instanceof ApiError ? e.message : "No se pudo actualizar el usuario.");
+    }
+  }
+
+  const ROLE_LABEL: Record<string, string> = {
+    admin: "Admin Rxcode",
+    viewer: "Visor Rxcode",
+    company_admin: "Admin",
+    company_editor: "Editor",
+    company_viewer: "Viewer",
+  };
+
+  function renderGroup(label: string, groupUsers: User[]) {
+    if (groupUsers.length === 0) return null;
+    return (
+      <section key={label} className="flex flex-col gap-3">
+        {/* Encabezado de sección */}
+        <div
+          className="flex items-center gap-3 px-4 py-2.5 rounded-xl"
+          style={{
+            background: "var(--c-section-bg)",
+            border: "1px solid var(--c-section-border)",
+          }}
+        >
+          <span
+            className="text-[0.7rem] font-bold uppercase tracking-widest"
+            style={{ color: "var(--c-section-text)" }}
+          >
+            {label}
+          </span>
+          <div className="flex-1" />
+          <span
+            className="text-[0.6875rem] font-semibold px-2.5 py-0.5 rounded-full"
+            style={{
+              background: "var(--c-section-border)",
+              color: "var(--c-section-text)",
+            }}
+          >
+            {groupUsers.length} {groupUsers.length === 1 ? "usuario" : "usuarios"}
+          </span>
+        </div>
+
+        <div className="border border-[var(--c-border)] rounded-[1.25rem] overflow-hidden">
+          {/* Tabla desktop */}
+          <table className="hidden md:table w-full text-sm table-fixed">
+            <colgroup>
+              <col className="w-[26%]" />
+              <col className="w-[27%]" />
+              <col className="w-[17%]" />
+              <col className="w-[12%]" />
+              <col className="w-[18%]" />
+            </colgroup>
+            <thead>
+              <tr className="text-left text-[var(--c-muted)] border-b border-[var(--c-line)]">
+                <th className="font-semibold px-4 py-3">Usuario</th>
+                <th className="font-semibold px-4 py-3">Correo</th>
+                <th className="font-semibold px-4 py-3">Rol</th>
+                <th className="font-semibold px-4 py-3">Estado</th>
+                <th className="px-4 py-3" />
+              </tr>
+            </thead>
+            <tbody>
+              {groupUsers.map((u) => (
+                <tr key={u.id} className="border-b border-[var(--c-line)] last:border-0">
+                  <td className="px-4 py-3 font-medium text-[var(--c-text)] truncate max-w-0">
+                    <span className="truncate">
+                      {u.username}
+                      {me?.id === u.id && (
+                        <span className="ml-2 text-[0.6875rem] text-[var(--c-muted)]">(tú)</span>
+                      )}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-[var(--c-text-sub)] truncate max-w-0">
+                    {u.email.includes("@invite.rxpanel") ? "—" : u.email}
+                  </td>
+                  <td className="px-4 py-3 text-[var(--c-text-sub)] truncate max-w-0">
+                    {ROLE_LABEL[u.role] ?? u.role}
+                  </td>
+                  <td className="px-4 py-3">
+                    <span
+                      className="text-[0.6875rem] font-semibold px-2 py-1 rounded-full"
+                      style={{
+                        color: u.is_active ? "var(--c-st-active)" : "var(--c-st-inactive)",
+                        background: u.is_active ? "var(--c-st-active-bg)" : "var(--c-st-inactive-bg)",
+                      }}
+                    >
+                      {u.is_active ? "Activo" : "Inactivo"}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center justify-end gap-1.5">
+                      {canManage && (
+                        <button
+                          type="button"
+                          title="Editar"
+                          onClick={() => { setEditing(u); setFormOpen(true); }}
+                          className="w-8 h-8 flex items-center justify-center rounded-lg border border-[var(--c-border)] text-[var(--c-muted)] hover:border-[var(--c-text-sub)] hover:text-[var(--c-text)] transition-colors cursor-pointer bg-transparent"
+                        >
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                            <path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4z" />
+                          </svg>
+                        </button>
+                      )}
+                      {me?.id !== u.id && canManage && (
+                        <button
+                          type="button"
+                          title={u.is_active ? "Desactivar cuenta" : "Activar cuenta"}
+                          onClick={() => toggleActive(u)}
+                          className="w-8 h-8 flex items-center justify-center rounded-lg border transition-colors cursor-pointer bg-transparent"
+                          style={u.is_active
+                            ? { borderColor: "var(--c-warning, #f59e0b)", color: "var(--c-warning, #f59e0b)" }
+                            : { borderColor: "var(--c-st-active)", color: "var(--c-st-active)" }
+                          }
+                        >
+                          {u.is_active ? (
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                              strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                              <rect x="6" y="4" width="4" height="16" rx="1" />
+                              <rect x="14" y="4" width="4" height="16" rx="1" />
+                            </svg>
+                          ) : (
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                              strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                              <polygon points="5 3 19 12 5 21" />
+                            </svg>
+                          )}
+                        </button>
+                      )}
+                      {me?.id !== u.id && canManage && (
+                        <button
+                          type="button"
+                          title="Eliminar"
+                          onClick={() => setToDelete(u)}
+                          className="w-8 h-8 flex items-center justify-center rounded-lg border border-[var(--c-danger)] text-[var(--c-danger)] hover:bg-[var(--c-danger)] hover:text-white transition-colors cursor-pointer bg-transparent"
+                        >
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                            <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                          </svg>
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          {/* Cards móvil */}
+          <div className="md:hidden divide-y divide-[var(--c-line)]">
+            {groupUsers.map((u) => (
+              <div key={u.id} className="p-4 flex flex-col gap-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="font-medium text-[var(--c-text)]">
+                    {u.username}
+                    {me?.id === u.id && (
+                      <span className="ml-2 text-[0.6875rem] text-[var(--c-muted)]">(tú)</span>
+                    )}
+                  </span>
+                  <span
+                    className="text-[0.6875rem] font-semibold px-2 py-1 rounded-full"
+                    style={{
+                      color: u.is_active ? "var(--c-st-active)" : "var(--c-st-inactive)",
+                      background: u.is_active ? "var(--c-st-active-bg)" : "var(--c-st-inactive-bg)",
+                    }}
+                  >
+                    {u.is_active ? "Activo" : "Inactivo"}
+                  </span>
+                </div>
+                <span className="text-[0.8125rem] text-[var(--c-text-sub)]">
+                  {u.email.includes("@invite.rxpanel") ? "—" : u.email}
+                </span>
+                <span className="text-[0.75rem] text-[var(--c-muted)]">
+                  {ROLE_LABEL[u.role] ?? u.role}
+                </span>
+                {canManage && (
+                  <div className="flex items-center gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => { setEditing(u); setFormOpen(true); }}
+                      className="flex-1 text-center text-[0.8125rem] px-3 py-2 rounded-lg border border-[var(--c-border)] text-[var(--c-text-sub)] cursor-pointer bg-transparent"
+                    >
+                      Editar
+                    </button>
+                    {me?.id !== u.id && (
+                      <button
+                        type="button"
+                        onClick={() => toggleActive(u)}
+                        className="flex-1 text-center text-[0.8125rem] px-3 py-2 rounded-lg border cursor-pointer bg-transparent"
+                        style={u.is_active
+                          ? { borderColor: "var(--c-warning, #f59e0b)", color: "var(--c-warning, #f59e0b)" }
+                          : { borderColor: "var(--c-st-active)", color: "var(--c-st-active)" }
+                        }
+                      >
+                        {u.is_active ? "Desactivar" : "Activar"}
+                      </button>
+                    )}
+                    {me?.id !== u.id && (
+                      <button
+                        type="button"
+                        onClick={() => setToDelete(u)}
+                        className="flex-1 text-center text-[0.8125rem] px-3 py-2 rounded-lg border border-[var(--c-danger)] text-[var(--c-danger)] cursor-pointer bg-transparent"
+                      >
+                        Eliminar
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+    );
   }
 
   return (
@@ -59,10 +313,10 @@ export default function UsersPage() {
         <div>
           <h1 className="text-xl font-bold text-[var(--c-text)]">Usuarios</h1>
           <p className="text-sm text-[var(--c-text-sub)] mt-0.5">
-            Cuentas con acceso al panel.
+            {isAdmin ? "Todas las cuentas del panel." : "Usuarios de tu empresa."}
           </p>
         </div>
-        {!forbidden && (
+        {!forbidden && canManage && (
           <Button
             onClick={() => {
               setEditing(null);
@@ -93,133 +347,26 @@ export default function UsersPage() {
             </svg>
             <p className="text-sm">Necesitas permisos de administrador para gestionar usuarios.</p>
           </div>
+        ) : isAdmin ? (
+          <div className="flex flex-col gap-6">
+            {renderGroup("Equipo Rxcode", users.filter((u) => u.company_id === null))}
+            {companies.map((company) =>
+              renderGroup(company.name, users.filter((u) => u.company_id === company.id))
+            )}
+            {users.length === 0 && (
+              <p className="text-sm text-[var(--c-muted)] text-center py-12">
+                No hay usuarios registrados.
+              </p>
+            )}
+          </div>
         ) : (
-          <div className="border border-[var(--c-border)] rounded-[1.25rem] overflow-hidden max-w-3xl">
-            {/* Tabla desktop */}
-            <table className="hidden md:table w-full text-sm">
-              <thead>
-                <tr className="text-left text-[var(--c-muted)] border-b border-[var(--c-line)]">
-                  <th className="font-semibold px-4 py-3">Usuario</th>
-                  <th className="font-semibold px-4 py-3">Correo</th>
-                  <th className="font-semibold px-4 py-3">Rol</th>
-                  <th className="font-semibold px-4 py-3">Estado</th>
-                  <th className="px-4 py-3" />
-                </tr>
-              </thead>
-              <tbody>
-                {users.map((u) => (
-                  <tr key={u.id} className="border-b border-[var(--c-line)] last:border-0">
-                    <td className="px-4 py-3 font-medium text-[var(--c-text)]">
-                      {u.username}
-                      {me?.id === u.id && (
-                        <span className="ml-2 text-[0.6875rem] text-[var(--c-muted)]">(tú)</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-[var(--c-text-sub)]">{u.email}</td>
-                    <td className="px-4 py-3 capitalize text-[var(--c-text-sub)]">
-                      {u.role === "admin" ? "Administrador" : "Lector"}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span
-                        className="text-[0.6875rem] font-semibold px-2 py-1 rounded-full"
-                        style={{
-                          color: u.is_active ? "var(--c-st-active)" : "var(--c-st-inactive)",
-                          background: u.is_active
-                            ? "var(--c-st-active-bg)"
-                            : "var(--c-st-inactive-bg)",
-                        }}
-                      >
-                        {u.is_active ? "Activo" : "Inactivo"}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center justify-end gap-2">
-                        <button
-                          type="button"
-                          title="Editar"
-                          onClick={() => {
-                            setEditing(u);
-                            setFormOpen(true);
-                          }}
-                          className="w-8 h-8 flex items-center justify-center rounded-lg border border-[var(--c-border)] text-[var(--c-muted)] hover:border-[var(--c-text-sub)] hover:text-[var(--c-text)] transition-colors cursor-pointer bg-transparent"
-                        >
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                            <path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4z" />
-                          </svg>
-                        </button>
-                        {me?.id !== u.id && (
-                          <button
-                            type="button"
-                            title="Eliminar"
-                            onClick={() => setToDelete(u)}
-                            className="w-8 h-8 flex items-center justify-center rounded-lg border border-[var(--c-danger)] text-[var(--c-danger)] hover:bg-[var(--c-danger)] hover:text-white transition-colors cursor-pointer bg-transparent"
-                          >
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                              strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                              <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-                            </svg>
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-
-            {/* Cards móvil */}
-            <div className="md:hidden divide-y divide-[var(--c-line)]">
-              {users.map((u) => (
-                <div key={u.id} className="p-4 flex flex-col gap-1.5">
-                  <div className="flex items-center justify-between">
-                    <span className="font-medium text-[var(--c-text)]">
-                      {u.username}
-                      {me?.id === u.id && (
-                        <span className="ml-2 text-[0.6875rem] text-[var(--c-muted)]">(tú)</span>
-                      )}
-                    </span>
-                    <span
-                      className="text-[0.6875rem] font-semibold px-2 py-1 rounded-full"
-                      style={{
-                        color: u.is_active ? "var(--c-st-active)" : "var(--c-st-inactive)",
-                        background: u.is_active
-                          ? "var(--c-st-active-bg)"
-                          : "var(--c-st-inactive-bg)",
-                      }}
-                    >
-                      {u.is_active ? "Activo" : "Inactivo"}
-                    </span>
-                  </div>
-                  <span className="text-[0.8125rem] text-[var(--c-text-sub)]">{u.email}</span>
-                  <span className="text-[0.75rem] text-[var(--c-muted)] capitalize">
-                    {u.role === "admin" ? "Administrador" : "Lector"}
-                  </span>
-                  <div className="flex items-center gap-2 pt-1">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setEditing(u);
-                        setFormOpen(true);
-                      }}
-                      className="flex-1 text-center text-[0.8125rem] px-3 py-2 rounded-lg border border-[var(--c-border)] text-[var(--c-text-sub)] cursor-pointer bg-transparent"
-                    >
-                      Editar
-                    </button>
-                    {me?.id !== u.id && (
-                      <button
-                        type="button"
-                        onClick={() => setToDelete(u)}
-                        className="px-3 py-2 rounded-lg border border-[var(--c-danger)] text-[var(--c-danger)] text-[0.8125rem] cursor-pointer bg-transparent"
-                      >
-                        Eliminar
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
+          <div className="flex flex-col gap-6">
+            {renderGroup(myCompanyName, users)}
+            {users.length === 0 && (
+              <p className="text-sm text-[var(--c-muted)] text-center py-12">
+                No hay usuarios en tu empresa.
+              </p>
+            )}
           </div>
         )}
       </div>
@@ -233,7 +380,7 @@ export default function UsersPage() {
       <ConfirmModal
         open={!!toDelete}
         title="Eliminar usuario"
-        message={`Se desactivará la cuenta de "${toDelete?.username}".`}
+        message={`¿Eliminar la cuenta de "${toDelete?.username}"? Esta acción no se puede deshacer.`}
         loading={deleting}
         onConfirm={confirmDelete}
         onCancel={() => setToDelete(null)}

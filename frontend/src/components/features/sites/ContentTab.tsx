@@ -3,17 +3,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiGet, apiPut, apiGetBlob, ApiError } from "@/lib/api";
 import { useToast } from "@/components/ui/Toast";
+import { useAuth } from "@/store/AuthContext";
 import { useSiteId } from "@/store/SiteContext";
 import { CONTENT_SECTIONS } from "@/lib/sections";
 import type { JsonValue } from "@/types/api";
 import Icon from "@/components/ui/Icon";
 import Spinner from "@/components/ui/Spinner";
-import Button from "@/components/ui/Button";
 import SchemaEditor from "@/components/features/editor/SchemaEditor";
 
 function derivePublicUrl(url: string): string {
   return url
-    .replace(/\/api\/(admin|v\d+)\/?$/, "")
+    .replace(/\/api\/(admin|rxpanel|v\d+)\/?$/, "")
     .replace(/\/admin\/?$/, "")
     .replace(/\/$/, "")
     .replace(/host\.docker\.internal/g, "localhost");
@@ -28,16 +28,18 @@ const PHONE_BOTTOM = 24;
 const FRAME_W = PHONE_W + PHONE_SIDE * 2;
 const FRAME_H = PHONE_H + PHONE_TOP + PHONE_BOTTOM;
 
-const IFRAME_SANDBOX = "allow-scripts allow-same-origin allow-forms allow-popups";
+const IFRAME_SANDBOX = "allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox";
 
 /* ── Vista escritorio ───────────────────────────────────────── */
 
 function DesktopPreview({
   url,
   sectionKey,
+  saveKey,
 }: {
   url: string;
   sectionKey: string;
+  saveKey: number;
 }) {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const [dims, setDims] = useState({ w: 0, h: 0 });
@@ -117,7 +119,7 @@ function DesktopPreview({
       <div ref={wrapperRef} className="flex-1 min-h-0 overflow-hidden relative" style={{ background: "#fff" }}>
         {dims.w > 0 && (
           <iframe
-            key={`${sectionKey}-desktop-${reloadKey}`}
+            key={`${sectionKey}-desktop-${reloadKey}-${saveKey}`}
             src={url}
             title="Vista escritorio"
             style={{
@@ -150,9 +152,11 @@ function DesktopPreview({
 function MobilePreview({
   url,
   sectionKey,
+  saveKey,
 }: {
   url: string;
   sectionKey: string;
+  saveKey: number;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [dims, setDims] = useState({ w: 0, h: 0 });
@@ -228,7 +232,7 @@ function MobilePreview({
                 }}
               >
                 <iframe
-                  key={`${sectionKey}-mobile-${reloadKey}`}
+                  key={`${sectionKey}-mobile-${reloadKey}-${saveKey}`}
                   src={url}
                   title="Vista móvil"
                   style={{ width: PHONE_W, height: PHONE_H, border: "none", display: "block" }}
@@ -598,11 +602,16 @@ function MetaPreview({ data, siteUrl }: { data: JsonValue; siteUrl?: string }) {
 export default function ContentTab({
   siteId,
   siteUrl,
+  saveNonce,
+  onSaveInfo,
 }: {
   siteId: number;
   siteUrl?: string;
+  saveNonce: number;
+  onSaveInfo: (info: { saving: boolean; dirty: boolean }) => void;
 }) {
   const toast = useToast();
+  const { isRxcode } = useAuth();
   const [active, setActive] = useState(CONTENT_SECTIONS[0].key);
   const [data, setData] = useState<JsonValue | null>(null);
   const [loading, setLoading] = useState(true);
@@ -610,14 +619,20 @@ export default function ContentTab({
   const [err, setErr] = useState<string>();
   const [raw, setRaw] = useState(false);
   const [rawText, setRawText] = useState("");
-  const [preview, setPreview] = useState(false);
-  const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
+  // La vista previa arranca abierta en móvil (para meta es la vista SEO).
+  const [preview, setPreview] = useState(true);
+  const [device, setDevice] = useState<"desktop" | "mobile">("mobile");
+  const [saveKey, setSaveKey] = useState(0);
+  // JSON de la última versión cargada/guardada — para detectar cambios sin guardar.
+  const [savedJson, setSavedJson] = useState("");
 
   const activeSection = CONTENT_SECTIONS.find((s) => s.key === active)!;
   const isMeta = active === "meta";
   const publicBase = siteUrl ? derivePublicUrl(siteUrl) : undefined;
-  const previewUrl = publicBase ? `${publicBase}#${activeSection.anchor}` : undefined;
+  const previewUrl = publicBase ? (activeSection.path ? `${publicBase}${activeSection.path}` : `${publicBase}#${activeSection.anchor}`) : undefined;
   const showPreview = preview && (isMeta || !!previewUrl);
+  const currentJson = data === null ? "" : raw ? rawText : JSON.stringify(data, null, 2);
+  const dirty = !loading && !err && data !== null && currentJson !== savedJson;
 
   const load = useCallback(
     async (section: string) => {
@@ -627,7 +642,9 @@ export default function ContentTab({
       try {
         const res = await apiGet<JsonValue>(`/proxy/${siteId}/content/${section}`);
         setData(res);
-        setRawText(JSON.stringify(res, null, 2));
+        const json = JSON.stringify(res, null, 2);
+        setRawText(json);
+        setSavedJson(json);
       } catch (e) {
         setErr(e instanceof ApiError ? `${e.status} — ${e.message}` : "No se pudo cargar la sección.");
       } finally {
@@ -638,6 +655,19 @@ export default function ContentTab({
   );
 
   useEffect(() => { load(active); }, [active, load]);
+
+  // Guardado coordinado desde el header de la página.
+  const saveRef = useRef<() => void>(() => {});
+  const handledNonce = useRef(saveNonce);
+  useEffect(() => {
+    if (saveNonce !== handledNonce.current) {
+      handledNonce.current = saveNonce;
+      saveRef.current();
+    }
+  }, [saveNonce]);
+  useEffect(() => {
+    onSaveInfo({ saving, dirty });
+  }, [saving, dirty, onSaveInfo]);
 
   async function save() {
     let payload: JsonValue;
@@ -651,7 +681,10 @@ export default function ContentTab({
     try {
       await apiPut(`/proxy/${siteId}/content/${active}`, payload);
       setData(payload);
-      setRawText(JSON.stringify(payload, null, 2));
+      const json = JSON.stringify(payload, null, 2);
+      setRawText(json);
+      setSavedJson(json);
+      setSaveKey((k) => k + 1);
       toast.success("Sección guardada.");
     } catch (e) {
       toast.error(e instanceof ApiError ? `${e.status} — ${e.message}` : "No se pudo guardar.");
@@ -659,6 +692,7 @@ export default function ContentTab({
       setSaving(false);
     }
   }
+  saveRef.current = save;
 
   return (
     <div className="flex flex-col md:flex-row gap-5 h-full">
@@ -696,43 +730,45 @@ export default function ContentTab({
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
-            {/* Botón ojo */}
-            <button
-              type="button"
-              onClick={() => {
-                if (!isMeta && !previewUrl) { toast.error("Este sitio no tiene URL configurada."); return; }
-                setPreview((p) => !p);
-              }}
-              title={preview ? "Cerrar vista previa" : isMeta ? "Vista SEO" : "Ver en el sitio"}
-              className={`w-9 h-9 flex items-center justify-center rounded-lg border transition-colors cursor-pointer bg-transparent ${
-                preview
-                  ? "border-[var(--c-text-sub)] text-[var(--c-text)] bg-[var(--c-active-pill)]"
-                  : "border-[var(--c-border)] text-[var(--c-muted)] hover:border-[var(--c-text-sub)] hover:text-[var(--c-text)]"
-              }`}
-            >
-              {preview ? (
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
-                  <path d="M1 1l22 22" />
-                </svg>
-              ) : (
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                  <circle cx="12" cy="12" r="3" />
-                </svg>
-              )}
-            </button>
-
-            {/* Selector de dispositivo — solo visible con preview abierto, no aplica para meta */}
-            {preview && previewUrl && !isMeta && (
+            {/* Vista previa — para meta es la vista SEO (sin dispositivo);
+                para el resto, dos botones: Escritorio y Móvil. */}
+            {isMeta ? (
+              <button
+                type="button"
+                onClick={() => setPreview((p) => !p)}
+                title={preview ? "Cerrar vista previa" : "Vista SEO"}
+                className={`w-9 h-9 flex items-center justify-center rounded-lg border transition-colors cursor-pointer bg-transparent ${
+                  preview
+                    ? "border-[var(--c-text-sub)] text-[var(--c-text)] bg-[var(--c-active-pill)]"
+                    : "border-[var(--c-border)] text-[var(--c-muted)] hover:border-[var(--c-text-sub)] hover:text-[var(--c-text)]"
+                }`}
+              >
+                {preview ? (
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+                    <path d="M1 1l22 22" />
+                  </svg>
+                ) : (
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                    <circle cx="12" cy="12" r="3" />
+                  </svg>
+                )}
+              </button>
+            ) : (
               <>
-                {/* Desktop */}
+                {/* Vista previa — Escritorio */}
                 <button
                   type="button"
-                  onClick={() => setDevice("desktop")}
-                  title="Vista escritorio"
+                  onClick={() => {
+                    if (!previewUrl) { toast.error("Este sitio no tiene URL configurada."); return; }
+                    if (preview && device === "desktop") { setPreview(false); return; }
+                    setDevice("desktop");
+                    setPreview(true);
+                  }}
+                  title="Vista previa — Escritorio"
                   className={`w-9 h-9 flex items-center justify-center rounded-lg border transition-colors cursor-pointer bg-transparent ${
-                    device === "desktop"
+                    preview && device === "desktop"
                       ? "border-[var(--c-text-sub)] text-[var(--c-text)] bg-[var(--c-active-pill)]"
                       : "border-[var(--c-border)] text-[var(--c-muted)] hover:border-[var(--c-text-sub)] hover:text-[var(--c-text)]"
                   }`}
@@ -742,13 +778,18 @@ export default function ContentTab({
                     <path d="M8 21h8M12 17v4" />
                   </svg>
                 </button>
-                {/* Móvil */}
+                {/* Vista previa — Móvil */}
                 <button
                   type="button"
-                  onClick={() => setDevice("mobile")}
-                  title="Vista móvil"
+                  onClick={() => {
+                    if (!previewUrl) { toast.error("Este sitio no tiene URL configurada."); return; }
+                    if (preview && device === "mobile") { setPreview(false); return; }
+                    setDevice("mobile");
+                    setPreview(true);
+                  }}
+                  title="Vista previa — Móvil"
                   className={`w-9 h-9 flex items-center justify-center rounded-lg border transition-colors cursor-pointer bg-transparent ${
-                    device === "mobile"
+                    preview && device === "mobile"
                       ? "border-[var(--c-text-sub)] text-[var(--c-text)] bg-[var(--c-active-pill)]"
                       : "border-[var(--c-border)] text-[var(--c-muted)] hover:border-[var(--c-text-sub)] hover:text-[var(--c-text)]"
                   }`}
@@ -761,24 +802,22 @@ export default function ContentTab({
               </>
             )}
 
-            {/* JSON raw */}
-            <button
-              type="button"
-              onClick={() => {
-                if (!raw && data !== null) setRawText(JSON.stringify(data, null, 2));
-                setRaw((r) => !r);
-              }}
-              title={raw ? "Editor visual" : "Editar JSON"}
-              className="w-9 h-9 flex items-center justify-center rounded-lg border border-[var(--c-border)] text-[var(--c-muted)] hover:border-[var(--c-text-sub)] hover:text-[var(--c-text)] transition-colors cursor-pointer bg-transparent"
-            >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M16 18l6-6-6-6M8 6l-6 6 6 6" />
-              </svg>
-            </button>
-
-            <Button onClick={save} loading={saving} disabled={loading || !!err} className="!w-auto">
-              Guardar
-            </Button>
+            {/* JSON raw — solo para usuarios internos de Rxcode */}
+            {isRxcode && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (!raw && data !== null) setRawText(JSON.stringify(data, null, 2));
+                  setRaw((r) => !r);
+                }}
+                title={raw ? "Editor visual" : "Editar JSON"}
+                className="w-9 h-9 flex items-center justify-center rounded-lg border border-[var(--c-border)] text-[var(--c-muted)] hover:border-[var(--c-text-sub)] hover:text-[var(--c-text)] transition-colors cursor-pointer bg-transparent"
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M16 18l6-6-6-6M8 6l-6 6 6 6" />
+                </svg>
+              </button>
+            )}
           </div>
         </div>
 
@@ -818,8 +857,8 @@ export default function ContentTab({
               ? <MetaPreview data={data} siteUrl={publicBase} />
               : previewUrl && (
                   device === "desktop"
-                    ? <DesktopPreview url={previewUrl} sectionKey={active} />
-                    : <MobilePreview url={previewUrl} sectionKey={active} />
+                    ? <DesktopPreview url={previewUrl} sectionKey={active} saveKey={saveKey} />
+                    : <MobilePreview url={previewUrl} sectionKey={active} saveKey={saveKey} />
                 )
           )}
         </div>

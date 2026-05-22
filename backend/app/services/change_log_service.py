@@ -2,6 +2,7 @@
 import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
+from sqlalchemy.orm import selectinload
 from fastapi import HTTPException
 
 from app.models.change_log import ChangeLog
@@ -43,7 +44,11 @@ async def get_history(
     Filtros opcionales: section y change_type.
     Ordenado por created_at DESC.
     """
-    query = select(ChangeLog).where(ChangeLog.site_id == site_id)
+    query = (
+        select(ChangeLog)
+        .where(ChangeLog.site_id == site_id)
+        .options(selectinload(ChangeLog.user))
+    )
 
     if section:
         query = query.where(ChangeLog.section == section)

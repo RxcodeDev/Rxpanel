@@ -5,7 +5,6 @@ import { apiGet, apiPut, ApiError } from "@/lib/api";
 import { useToast } from "@/components/ui/Toast";
 import type { SiteColors } from "@/types/api";
 import Spinner from "@/components/ui/Spinner";
-import Button from "@/components/ui/Button";
 import { humanize } from "@/lib/format";
 
 /* ── Helpers de color ──────────────────────────────────────────── */
@@ -97,9 +96,19 @@ function groupOf(key: string): string {
 
 /* ── Componente ────────────────────────────────────────────────── */
 
-export default function ColorsTab({ siteId }: { siteId: number }) {
+export default function ColorsTab({
+  siteId,
+  saveNonce,
+  onSaveInfo,
+}: {
+  siteId: number;
+  saveNonce: number;
+  onSaveInfo: (info: { saving: boolean; dirty: boolean }) => void;
+}) {
   const toast = useToast();
   const [colors, setColors] = useState<SiteColors>({});
+  // JSON de la última versión cargada/guardada — para detectar cambios sin guardar.
+  const [savedJson, setSavedJson] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string>();
@@ -109,7 +118,9 @@ export default function ColorsTab({ siteId }: { siteId: number }) {
     setLoading(true);
     setErr(undefined);
     try {
-      setColors(await apiGet<SiteColors>(`/proxy/${siteId}/colors`));
+      const res = await apiGet<SiteColors>(`/proxy/${siteId}/colors`);
+      setColors(res);
+      setSavedJson(JSON.stringify(res));
     } catch (e) {
       setErr(
         e instanceof ApiError
@@ -124,6 +135,20 @@ export default function ColorsTab({ siteId }: { siteId: number }) {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Guardado coordinado desde el header de la página.
+  const saveRef = useRef<() => void>(() => {});
+  const handledNonce = useRef(saveNonce);
+  useEffect(() => {
+    if (saveNonce !== handledNonce.current) {
+      handledNonce.current = saveNonce;
+      saveRef.current();
+    }
+  }, [saveNonce]);
+  const dirty = !loading && !err && JSON.stringify(colors) !== savedJson;
+  useEffect(() => {
+    onSaveInfo({ saving, dirty });
+  }, [saving, dirty, onSaveInfo]);
 
   const grouped = useMemo(() => {
     const out: Record<string, string[]> = {};
@@ -147,6 +172,7 @@ export default function ColorsTab({ siteId }: { siteId: number }) {
     setSaving(true);
     try {
       await apiPut(`/proxy/${siteId}/colors`, colors);
+      setSavedJson(JSON.stringify(colors));
       toast.success("Colores guardados.");
     } catch (e) {
       toast.error(
@@ -156,6 +182,7 @@ export default function ColorsTab({ siteId }: { siteId: number }) {
       setSaving(false);
     }
   }
+  saveRef.current = save;
 
   function exportPalette() {
     const blob = new Blob([JSON.stringify(colors, null, 2)], {
@@ -300,9 +327,6 @@ export default function ColorsTab({ siteId }: { siteId: number }) {
             </svg>
             Exportar
           </button>
-          <Button onClick={save} loading={saving} className="!w-auto">
-            Guardar
-          </Button>
         </div>
       </div>
 

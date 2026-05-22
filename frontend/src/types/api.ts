@@ -1,12 +1,13 @@
 // Contratos espejo del backend FastAPI de Rxpanel.
 
-export type UserRole = "admin" | "viewer";
+export type UserRole = "admin" | "viewer" | "company_admin" | "company_editor" | "company_viewer";
 
 export interface User {
   id: string;
   email: string;
   username: string;
   role: UserRole;
+  company_id: number | null;
   is_active: boolean;
 }
 
@@ -14,6 +15,30 @@ export interface LoginResponse {
   access_token: string;
   refresh_token: string;
   token_type: string;
+}
+
+export interface Company {
+  id: number;
+  name: string;
+  description: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface InviteToken {
+  id: string;
+  token: string;
+  company_id: number;
+  is_used: boolean;
+  expires_at: string;
+  created_at: string;
+}
+
+export interface InviteValidation {
+  valid: boolean;
+  company_name: string;
+  expires_at: string;
 }
 
 export type SiteStatus = "active" | "inactive" | "maintenance" | "error";
@@ -28,6 +53,7 @@ export interface Site {
   icon: string | null;
   icon_color: string | null;
   owner_id: string;
+  company_id: number | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;
@@ -52,6 +78,7 @@ export interface ChangeLog {
   change_type: string;
   payload_snapshot: Record<string, unknown>;
   created_at: string;
+  user: { email: string; username: string } | null;
 }
 
 // El sitio gestionado define qué tokens expone; el editor es genérico.
@@ -70,3 +97,16 @@ export type JsonValue =
   | null
   | JsonValue[]
   | { [key: string]: JsonValue };
+
+/** Lead enviado desde el formulario de contacto del sitio gestionado. */
+export interface Lead {
+  id: number;
+  createdAt: string;
+  name: string;
+  email: string;
+  phone: string;
+  state: string | null;
+  budget: string | null;
+  budgetOther: string | null;
+  services: string[];
+}

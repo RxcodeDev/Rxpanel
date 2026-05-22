@@ -21,8 +21,8 @@ router = APIRouter(prefix="/proxy", tags=["proxy"])
 
 
 def site_origin(site_url: str) -> str:
-    """Strip /api/admin or /api/v1 suffix to get the site's static-file root."""
-    return re.sub(r"/api/(admin|v\d+)/?$", "", site_url.rstrip("/"))
+    """Elimina el segmento /api/<ruta> del URL para obtener la raíz de archivos estáticos."""
+    return re.sub(r"/api/[^/]+/?$", "", site_url.rstrip("/"))
 
 
 # ── GET ───────────────────────────────────────────────────────────────────
@@ -155,6 +155,18 @@ async def upload_asset(
         db, site_id, current_user.id, "assets", "upload", {"path": result.get("path")}
     )
     return result
+
+
+@router.get("/{site_id}/leads")
+async def get_leads(
+    site_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Obtiene los leads del formulario de contacto del sitio."""
+    site = await site_service.get_by_id(db, site_id, current_user)
+    url = f"{site.url.rstrip('/')}/leads"
+    return await proxy_get(url, site.api_token)
 
 
 @router.get("/{site_id}/asset")

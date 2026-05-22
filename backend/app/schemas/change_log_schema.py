@@ -1,7 +1,15 @@
-# app/schemas/change_log.py
+# app/schemas/change_log_schema.py
 from datetime import datetime
 from uuid import UUID
 from pydantic import BaseModel
+
+
+class ChangeLogUser(BaseModel):
+    """Datos mínimos del usuario que hizo el cambio (sin información sensible)."""
+    email: str
+    username: str
+
+    model_config = {"from_attributes": True}
 
 
 class ChangeLogRead(BaseModel):
@@ -12,5 +20,6 @@ class ChangeLogRead(BaseModel):
     change_type: str
     payload_snapshot: dict
     created_at: datetime
+    user: ChangeLogUser | None = None
 
     model_config = {"from_attributes": True}

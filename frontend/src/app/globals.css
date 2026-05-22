@@ -30,6 +30,11 @@
   --c-st-maint-bg:    #fffbeb;
   --c-st-error:       #c0392b;
   --c-st-error-bg:    #fef2f2;
+
+  /* Sección agrupada (encabezados con acento cyan) */
+  --c-section-bg:     rgba(6, 182, 212, 0.06);
+  --c-section-text:   #0891b2;
+  --c-section-border: rgba(6, 182, 212, 0.2);
 }
 
 @theme inline {
@@ -53,6 +58,11 @@
   --c-st-active:      #4ade80;
   --c-st-active-bg:   rgba(74, 222, 128, 0.12);
   --c-st-inactive:    #6b7280;
+
+  /* Sección agrupada (modo oscuro) */
+  --c-section-bg:     rgba(6, 182, 212, 0.09);
+  --c-section-text:   #22d3ee;
+  --c-section-border: rgba(6, 182, 212, 0.18);
   --c-st-inactive-bg: rgba(107, 114, 128, 0.12);
   --c-st-maint:       #fbbf24;
   --c-st-maint-bg:    rgba(251, 191, 36, 0.12);

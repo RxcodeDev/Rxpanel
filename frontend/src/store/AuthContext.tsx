@@ -46,6 +46,9 @@ function reducer(state: AuthState, action: Action): AuthState {
 interface AuthContextValue extends AuthState {
   isAuthenticated: boolean;
   isAdmin: boolean;
+  isCompanyAdmin: boolean;
+  /** Usuario interno de Rxcode (rol no perteneciente a una empresa cliente). */
+  isRxcode: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
@@ -105,6 +108,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         ...state,
         isAuthenticated: !!state.user,
         isAdmin: state.user?.role === "admin",
+        isCompanyAdmin: state.user?.role === "company_admin",
+        isRxcode: !!state.user && !state.user.role.startsWith("company_"),
         login,
         logout,
         refreshUser,

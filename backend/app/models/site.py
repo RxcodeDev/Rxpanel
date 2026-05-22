@@ -2,7 +2,7 @@
 import enum
 import uuid
 from datetime import datetime
-from sqlalchemy import String, Text, Boolean, DateTime, Enum, ForeignKey, func
+from sqlalchemy import String, Text, Boolean, DateTime, Enum, ForeignKey, func, Index, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.session import Base
@@ -17,10 +17,20 @@ class SiteStatus(str, enum.Enum):
 
 class Site(Base):
     __tablename__ = "sites"
+    __table_args__ = (
+        # Unicidad de URL solo entre sitios activos: un sitio borrado con soft
+        # delete (is_active=False) no bloquea la reutilizacion de su URL.
+        Index(
+            "uq_sites_url_active",
+            "url",
+            unique=True,
+            postgresql_where=text("is_active"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    url: Mapped[str] = mapped_column(String(2048), unique=True, nullable=False, index=True)
+    url: Mapped[str] = mapped_column(String(2048), nullable=False, index=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[SiteStatus] = mapped_column(Enum(SiteStatus), default=SiteStatus.active)
     is_ssl: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -41,6 +51,11 @@ class Site(Base):
         nullable=False
     )
     owner: Mapped["User"] = relationship("User", backref="sites")
+
+    # Empresa dueña del sitio. Nulo para sitios internos de rxcode.
+    company_id: Mapped[int | None] = mapped_column(
+        ForeignKey("companies.id"), nullable=True
+    )
 
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())

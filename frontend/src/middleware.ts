@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 const COOKIE_NAME = "rxpanel_token";
-const PUBLIC_PATHS = ["/login"];
+const PUBLIC_PATHS = ["/login", "/registro"];
 
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;

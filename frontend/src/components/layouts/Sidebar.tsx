@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useAuth } from "@/store/AuthContext";
 import { apiGet } from "@/lib/api";
-import type { Site, User } from "@/types/api";
+import type { Site, User, Company } from "@/types/api";
 import ThemeToggle from "./ThemeToggle";
 
 const NAV = [
@@ -15,9 +15,19 @@ const NAV = [
     icon: ["M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z", "M9 22V12h6v10"],
   },
   {
+    href: "/empresas",
+    label: "Empresas",
+    adminOnly: true,
+    icon: [
+      "M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z",
+      "M9 22V12h6v10",
+      "M2 9h20",
+    ],
+  },
+  {
     href: "/usuarios",
     label: "Usuarios",
-    adminOnly: true,
+    companyAdminOk: true,
     icon: [
       "M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2",
       "M9 7a4 4 0 1 0 0 .01",
@@ -40,11 +50,15 @@ function NavIcon({ paths }: { paths: string[] }) {
 
 export default function Sidebar() {
   const pathname = usePathname();
-  const { user, isAdmin, logout } = useAuth();
+  const { user, isAdmin, isCompanyAdmin, logout } = useAuth();
   const [open, setOpen] = useState(false);
   const [counts, setCounts] = useState<Record<string, number | undefined>>({});
 
-  const links = NAV.filter((n) => !n.adminOnly || isAdmin);
+  const links = NAV.filter((n) => {
+    if (n.adminOnly) return isAdmin;
+    if (n.companyAdminOk) return isAdmin || isCompanyAdmin;
+    return true;
+  });
 
   // Conteos junto a cada enlace. Se refrescan al navegar y cuando una vista
   // emite "rxpanel:data-changed" tras crear/editar/eliminar.
@@ -57,10 +71,18 @@ export default function Sidebar() {
       } catch {
         /* el conteo no es crítico: se omite ante un error */
       }
-      if (isAdmin) {
+      if (isAdmin || isCompanyAdmin) {
         try {
           const users = await apiGet<User[]>("/users/");
           if (!cancelled) setCounts((c) => ({ ...c, "/usuarios": users.length }));
+        } catch {
+          /* idem */
+        }
+      }
+      if (isAdmin) {
+        try {
+          const companies = await apiGet<Company[]>("/companies/");
+          if (!cancelled) setCounts((c) => ({ ...c, "/empresas": companies.length }));
         } catch {
           /* idem */
         }
@@ -72,7 +94,7 @@ export default function Sidebar() {
       cancelled = true;
       window.removeEventListener("rxpanel:data-changed", loadCounts);
     };
-  }, [isAdmin, pathname]);
+  }, [isAdmin, isCompanyAdmin, pathname]);
 
   const content = (
     <>

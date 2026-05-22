@@ -42,9 +42,20 @@ async def get_current_user(
 
 
 async def require_admin(current_user: User = Depends(get_current_user)) -> User:
+    """Solo rxcode admin (role=admin)."""
     if current_user.role != UserRole.admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Se requieren permisos de administrador",
+        )
+    return current_user
+
+
+async def require_company_admin(current_user: User = Depends(get_current_user)) -> User:
+    """company_admin o rxcode admin."""
+    if current_user.role not in (UserRole.admin, UserRole.company_admin):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Se requieren permisos de administrador de empresa",
         )
     return current_user

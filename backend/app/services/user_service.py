@@ -4,7 +4,7 @@ from sqlalchemy import select
 from fastapi import HTTPException
 
 from app.models.user import User, UserRole
-from app.schemas.user import UserCreate, UserRegister, UserUpdate
+from app.schemas.user import UserCreate, UserRegister, UserUpdate, CompanyUserCreate
 from app.core.security import hash_password, verify_password
 
 
@@ -23,7 +23,20 @@ async def get_by_id(db: AsyncSession, user_id: str) -> User | None:
 
 
 async def list_users(db: AsyncSession, skip: int = 0, limit: int = 50) -> list[User]:
-    result = await db.execute(select(User).offset(skip).limit(limit))
+    """Lista todos los usuarios no eliminados (solo rxcode admin)."""
+    result = await db.execute(
+        select(User).where(User.is_deleted == False).offset(skip).limit(limit)  # noqa: E712
+    )
+    return result.scalars().all()
+
+
+async def list_company_users(db: AsyncSession, company_id: int, skip: int = 0, limit: int = 50) -> list[User]:
+    """Lista usuarios no eliminados de una empresa específica."""
+    result = await db.execute(
+        select(User)
+        .where(User.company_id == company_id, User.is_deleted == False)  # noqa: E712
+        .offset(skip).limit(limit)
+    )
     return result.scalars().all()
 
 
@@ -43,7 +56,7 @@ async def create_viewer(db: AsyncSession, data: UserRegister) -> User:
         email=data.email.lower(),
         username=data.username,
         hashed_password=hash_password(data.password),
-        role=UserRole.viewer,  # hardcodeado, sin excepciones
+        role=UserRole.viewer,
         is_active=True,
     )
     db.add(user)
@@ -52,7 +65,31 @@ async def create_viewer(db: AsyncSession, data: UserRegister) -> User:
     return user
 
 
-# CREACIÓN POR ADMIN — puede asignar rol
+# REGISTRO VIA INVITACION — se convierte en company_admin de esa empresa
+async def create_via_invite(db: AsyncSession, username: str, password: str, company_id: int) -> User:
+    """
+    Registra al dueño de la empresa a través de un token de invitación.
+    El email se genera automáticamente; el usuario puede actualizarlo después.
+    """
+    # Generamos un email temporal único basado en el username
+    temp_email = f"{username.lower()}@invite.rxpanel.local"
+    await _validate_unique(db, temp_email, username)
+
+    user = User(
+        email=temp_email,
+        username=username,
+        hashed_password=hash_password(password),
+        role=UserRole.company_admin,
+        company_id=company_id,
+        is_active=True,
+    )
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+    return user
+
+
+# CREACIÓN POR RXCODE ADMIN — puede asignar cualquier rol
 async def create(db: AsyncSession, data: UserCreate) -> User:
     await _validate_unique(db, data.email, data.username)
 
@@ -60,7 +97,28 @@ async def create(db: AsyncSession, data: UserCreate) -> User:
         email=data.email.lower(),
         username=data.username,
         hashed_password=hash_password(data.password),
-        role=data.role or UserRole.viewer,  # default viewer si admin no elige
+        role=data.role or UserRole.viewer,
+        company_id=data.company_id,
+        is_active=True,
+    )
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+    return user
+
+
+# CREACIÓN POR COMPANY_ADMIN — puede crear company_editor o company_viewer en su empresa
+async def create_company_user(db: AsyncSession, data: CompanyUserCreate, company_id: int) -> User:
+    await _validate_unique(db, data.email, data.username)
+
+    role = data.role if data.role in (UserRole.company_editor, UserRole.company_viewer) else UserRole.company_viewer
+
+    user = User(
+        email=data.email.lower(),
+        username=data.username,
+        hashed_password=hash_password(data.password),
+        role=role,
+        company_id=company_id,
         is_active=True,
     )
     db.add(user)
@@ -91,6 +149,8 @@ async def update(db: AsyncSession, user: User, data: UserUpdate) -> User:
 
 
 async def soft_delete(db: AsyncSession, user: User) -> None:
+    # Marca como eliminado e inactivo; se filtra de todos los listados
+    user.is_deleted = True
     user.is_active = False
     await db.commit()
     

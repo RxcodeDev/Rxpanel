@@ -11,6 +11,8 @@ export interface SectionMeta {
   icon: string[];
   /** Fragmento (#id) para anclar la vista previa en el sitio. */
   anchor: string;
+  /** Ruta completa opcional (e.g. "/portafolio") — si se provee, reemplaza #anchor en el preview. */
+  path?: string;
 }
 
 export const CONTENT_SECTIONS: SectionMeta[] = [
@@ -62,6 +64,14 @@ export const CONTENT_SECTIONS: SectionMeta[] = [
     description: "Fotos y videos de trabajos realizados.",
     icon: ["M21 15V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14", "M3 19l6-6 4 4 8-8"],
     anchor: "portfolio",
+  },
+  {
+    key: "portfolioPage",
+    label: "Portafolio Completo",
+    description: "Sitios web, fotos y videos de la página /portafolio.",
+    icon: ["M3 3h7v7H3z", "M14 3h7v7h-7z", "M3 14h7v7H3z", "M14 14h7v7h-7z"],
+    anchor: "portfolio",
+    path: "/portafolio",
   },
   {
     key: "testimonials",

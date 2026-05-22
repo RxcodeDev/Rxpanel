@@ -1,16 +1,25 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { apiGet, apiPut, ApiError } from "@/lib/api";
 import { useToast } from "@/components/ui/Toast";
 import type { SiteLogos } from "@/types/api";
 import Spinner from "@/components/ui/Spinner";
-import Button from "@/components/ui/Button";
 import ImageField from "@/components/features/editor/ImageField";
 
-export default function LogosTab({ siteId }: { siteId: number }) {
+export default function LogosTab({
+  siteId,
+  saveNonce,
+  onSaveInfo,
+}: {
+  siteId: number;
+  saveNonce: number;
+  onSaveInfo: (info: { saving: boolean; dirty: boolean }) => void;
+}) {
   const toast = useToast();
   const [logos, setLogos] = useState<SiteLogos>({});
+  // JSON de la última versión cargada/guardada — para detectar cambios sin guardar.
+  const [savedJson, setSavedJson] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string>();
@@ -19,7 +28,9 @@ export default function LogosTab({ siteId }: { siteId: number }) {
     setLoading(true);
     setErr(undefined);
     try {
-      setLogos(await apiGet<SiteLogos>(`/proxy/${siteId}/logos`));
+      const res = await apiGet<SiteLogos>(`/proxy/${siteId}/logos`);
+      setLogos(res);
+      setSavedJson(JSON.stringify(res));
     } catch (e) {
       setErr(e instanceof ApiError ? `${e.status} — ${e.message}` : "No se pudieron cargar los logos.");
     } finally {
@@ -31,10 +42,25 @@ export default function LogosTab({ siteId }: { siteId: number }) {
     load();
   }, [load]);
 
+  // Guardado coordinado desde el header de la página.
+  const saveRef = useRef<() => void>(() => {});
+  const handledNonce = useRef(saveNonce);
+  useEffect(() => {
+    if (saveNonce !== handledNonce.current) {
+      handledNonce.current = saveNonce;
+      saveRef.current();
+    }
+  }, [saveNonce]);
+  const dirty = !loading && !err && JSON.stringify(logos) !== savedJson;
+  useEffect(() => {
+    onSaveInfo({ saving, dirty });
+  }, [saving, dirty, onSaveInfo]);
+
   async function save() {
     setSaving(true);
     try {
       await apiPut(`/proxy/${siteId}/logos`, logos);
+      setSavedJson(JSON.stringify(logos));
       toast.success("Logos guardados.");
     } catch (e) {
       toast.error(e instanceof ApiError ? `${e.status} — ${e.message}` : "No se pudo guardar.");
@@ -42,6 +68,7 @@ export default function LogosTab({ siteId }: { siteId: number }) {
       setSaving(false);
     }
   }
+  saveRef.current = save;
 
   if (loading)
     return (
@@ -72,11 +99,6 @@ export default function LogosTab({ siteId }: { siteId: number }) {
         value={logos.favicon_url ?? ""}
         onChange={(v) => setLogos((l) => ({ ...l, favicon_url: v }))}
       />
-      <div>
-        <Button onClick={save} loading={saving} className="!w-auto">
-          Guardar logos
-        </Button>
-      </div>
     </div>
   );
 }

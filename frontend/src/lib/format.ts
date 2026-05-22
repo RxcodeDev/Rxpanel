@@ -13,7 +13,7 @@ export function humanize(key: string): string {
 }
 
 const IMG_KEYS =
-  /(img|image|logo|favicon|icon|src|poster|avatar|photo|picture|background|cover)/i;
+  /(img|image|logo|favicon|icon|src|poster|avatar|photo|picture|background|cover|screenshot)/i;
 const IMG_EXT = /\.(png|jpe?g|svg|gif|webp|avif)(\?.*)?$/i;
 
 export function looksLikeImage(key: string, value: string): boolean {
@@ -46,6 +46,9 @@ const FIELD_HINTS: [RegExp, string][] = [
   [/suffix/i, "Texto después del número, ej: + o %"],
   [/prefix/i, "Texto antes del número"],
   [/tagline/i, "Frase corta de identidad de marca"],
+  [/custominputplaceholder/i, "Texto de ejemplo dentro del campo de monto libre"],
+  [/custominputlabel/i, "Título del campo de monto libre que aparece al elegir el rango"],
+  [/custominput/i, "Si se activa, al elegir este rango se muestra un campo de monto libre"],
   [/\blabel\b/i, "Etiqueta o texto visible"],
 ];
 

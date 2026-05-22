@@ -46,7 +46,7 @@ backend:
     schemas_dir: app/schemas/
     core_dir: app/core/
   models[5]{name,pk,fields,notes}:
-    User,UUID,"email,username,hashed_password,role,is_active,created_at,updated_at","role admin|viewer; soft-disable is_active; hashed_password nunca en respuestas"
+    User,UUID,"email,username,hashed_password,role,is_active,is_deleted,created_at,updated_at","role admin|viewer|company_admin|company_editor|company_viewer; soft-deactivate is_active; soft-delete is_deleted; hashed_password nunca en respuestas"
     Site,int,"name,url,description,status,is_ssl,icon,icon_color,api_token,is_active,owner_id,created_at,updated_at","status active|inactive|maintenance|error; api_token Fernet-encrypted y nunca en respuestas; soft-delete is_active; owner_id FK users"
     ChangeLog,UUID,"site_id,user_id,section,change_type,payload_snapshot,created_at","change_type create|update|delete; payload_snapshot JSONB con el estado completo"
     RefreshToken,UUID,"token,user_id,is_revoked,expires_at,created_at",TTL 7 dias
@@ -58,14 +58,23 @@ backend:
     POST,/auth/logout,none,Revoca el refresh token
     POST,/auth/recover,none,Genera token de recuperación
     POST,/auth/reset,none,Aplica nueva contraseña
-  users_routes[7]{method,path,auth,description}:
+  users_routes[8]{method,path,auth,description}:
     GET,/users/me,user,Perfil propio
-    GET,/users/,admin,Lista usuarios
-    GET,/users/{id},admin,Detalle de usuario
-    POST,/users/,admin,Crea usuario
-    PATCH,/users/{id},admin,Actualización parcial
-    PATCH,/users/{id}/restore,admin,Reactiva usuario
-    DELETE,/users/{id},admin,Soft delete
+    GET,/users/,company_admin,Lista usuarios (admin ve todos; company_admin ve solo su empresa)
+    GET,/users/{id},company_admin,Detalle (403 si diferente empresa)
+    POST,/users/,admin,Crea usuario rxcode
+    POST,/users/company,company_admin,Crea editor/viewer en la empresa propia
+    PATCH,/users/{id},company_admin,Actualización parcial (role+company_id solo para admin)
+    PATCH,/users/{id}/restore,company_admin,Reactiva usuario desactivado
+    DELETE,/users/{id},company_admin,Soft delete (is_deleted=True + is_active=False)
+  companies_routes[5]{method,path,auth,description}:
+    GET,/companies/,admin,Lista todas las empresas
+    GET,/companies/me,company_admin,Empresa propia del usuario autenticado
+    GET,/companies/{id},admin,Detalle de empresa
+    POST,/companies/,admin,Crea empresa
+    DELETE,/companies/{id},admin,Elimina empresa
+    GET,/companies/{id}/invites,admin,Lista invitaciones activas
+    POST,/companies/{id}/invites,admin,Genera link de invitación (token)
   sites_routes[6]{method,path,auth,description}:
     GET,/sites/,user,"admin ve todos; viewer solo los suyos"
     GET,/sites/{id},user,Detalle (dueño o admin)
@@ -91,8 +100,8 @@ backend:
   other_routes[2]{method,path,auth,description}:
     GET,/history/{id},user,Historial de cambios paginado
     GET,/health/,none,Health check
-  migrations[8]: create_users,create_sites,create_refresh_tokens,create_password_reset_tokens,create_change_logs,006_sites_api_token,007_change_logs_indexes,008_sites_icon
-  migrations_note: "8 archivos en alembic/versions/; las nuevas continúan desde 009"
+  migrations[12]: create_users,create_sites,create_refresh_tokens,create_password_reset_tokens,create_change_logs,006_sites_api_token,007_change_logs_indexes,008_sites_icon,009_add_companies,010_add_multitenancy,011_add_company_editor,012_add_is_deleted_users
+  migrations_note: "12 archivos en alembic/versions/; las nuevas continúan desde 013"
   auth_flow:
     login: "POST /auth/login devuelve access_token + refresh_token + token_type"
     protected_header: "Authorization: Bearer <access_token>"
@@ -110,13 +119,14 @@ backend:
     ACCESS_TOKEN_EXPIRE_MINUTES,Expiración del access token (default 480)
     FERNET_KEY,Clave base64 url-safe para encriptar api_token
     FRONTEND_URL,Origen permitido por CORS
-  conventions[6]:
+  conventions[7]:
     - "Todo es async: usar await y AsyncSession; nunca mezclar Session sync"
     - "Los servicios son dueños de la BD; las rutas solo orquestan"
     - "api_token siempre Fernet-encrypted al escribir y nunca en respuestas"
     - "hashed_password nunca en respuestas"
-    - "Soft delete con is_active=False; nunca borrado físico"
-    - "Roles via require_admin a nivel de router; timestamps naive sin timezone"
+    - "Soft delete de usuarios: is_deleted=True + is_active=False; is_active solo se usa para desactivar sin eliminar"
+    - "Roles via require_admin / require_company_admin a nivel de router; timestamps naive sin timezone"
+    - "Pydantic v2: nunca asignar field=None en instancias de modelo; usar model_fields_set.discard() para excluir campos"
 
 frontend:
   path: frontend/
@@ -129,12 +139,13 @@ frontend:
     build: "output standalone; eslint.ignoreDuringBuilds true"
   api_base_env: NEXT_PUBLIC_API_URL
   shared_design: "lenguaje visual de Rxflow (tokens CSS B/N/gris)"
-  pages[5]{route,access,purpose}:
+  pages[6]{route,access,purpose}:
     /,user,Redirige al panel
     /login,public,Login y recuperar/resetear contraseña
     /sitios,user,Lista y CRUD de sitios
     /sitios/{id},user,Detalle con tabs Contenido/Colores/Logos/Historial
-    /usuarios,admin,Gestión de usuarios (403 muestra estado restringido)
+    /usuarios,company_admin,Gestión de usuarios agrupada por empresa; company_admin ve solo su grupo
+    /empresas,admin,Gestión de empresas (solo rxcode admin)
   key_modules[6]{file,role}:
     src/middleware.ts,Protege rutas según la cookie rxpanel_token
     src/lib/api.ts,Cliente HTTP; extrae errores detail; logout automático en 401
@@ -144,13 +155,15 @@ frontend:
     src/components/features/editor/SchemaEditor.tsx,Editor JSON genérico recursivo
   content_sections[10]: meta,navbar,hero,clients,services,stats,portfolio,testimonials,contact,footer
   schema_editor: "renderiza cualquier JSON del proxy: objeto→grupo, array→lista reordenable, string→input/textarea/imagen, number→input, boolean→toggle; modo JSON crudo disponible"
-  conventions[6]:
+  conventions[8]:
     - "Cero colores hardcodeados; usar siempre var(--c-*)"
     - "'use client' solo con hooks, estado o APIs del navegador"
     - "Mobile-first; las tablas se vuelven cards en móvil"
     - "Nunca <select> nativo; usar el componente SearchSelect"
     - "Botones normalizados en ui/Button (primario/ghost/danger)"
     - "types/api.ts es espejo del backend; sincronizar al cambiar un schema"
+    - "Dark mode: atributo [data-theme='dark'] en <html>; Tailwind dark: NO funciona; estilos dark en globals.css bajo [data-theme='dark']"
+    - "Secciones agrupadas: encabezado cyan con var(--c-section-bg/text/border); botones icono w-8 h-8 con borde"
 
 integration:
   flow[4]:
@@ -160,10 +173,13 @@ integration:
     - "Cada PUT vía proxy queda registrado en change_logs (historial)"
   shared_contract: "frontend/src/types/api.ts refleja los schemas Pydantic del backend"
 
-gotchas[6]:
+gotchas[8]:
   - "bcrypt anclado a <4.0.0: passlib 1.7.4 es incompatible con bcrypt 4.x (login/registro fallan con 500)"
   - "Migraciones Alembic usan SQL puro (op.execute), no op.create_table() con Enum"
   - "api_token nunca en respuestas ni logs; siempre Fernet-encrypted"
-  - "Soft delete con is_active=False; nunca borrado físico vía API"
+  - "Soft delete usuarios: is_deleted=True + is_active=False; list endpoints filtran is_deleted=False"
   - "Timestamps naive en BD (sin timezone); usar replace(tzinfo=None)"
   - "Frontend sin colores hardcodeados; siempre var(--c-*)"
+  - "Pydantic v2: asignar field=None directamente añade el campo a model_fields_set → model_dump(exclude_unset=True) lo incluirá con None; usar model_fields_set.discard()"
+  - "Dark mode: usar [data-theme='dark'] en globals.css, NO la variante Tailwind dark:"
+  - "URL base al agregar un sitio local en Docker: desde el navegador usar http://localhost:3000; desde otro contenedor Docker usar http://host.docker.internal:3000"

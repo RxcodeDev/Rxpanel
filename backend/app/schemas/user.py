@@ -12,22 +12,32 @@ class UserRegister(BaseModel):
     password: str
 
 
-# Creación por admin — puede elegir el rol
+# Creación por admin rxcode — puede elegir el rol y company_id
 class UserCreate(BaseModel):
     email: EmailStr
     username: str
     password: str
-    role: Optional[UserRole] = UserRole.viewer  # default viewer, admin puede cambiarlo
+    role: Optional[UserRole] = UserRole.viewer
+    company_id: Optional[int] = None
+
+
+# Creación por company_admin — el role puede ser company_editor o company_viewer
+class CompanyUserCreate(BaseModel):
+    email: EmailStr
+    username: str
+    password: str
+    role: Optional[UserRole] = None  # se valida en la ruta
 
 
 class UserRead(BaseModel):
     id: UUID
-    email: EmailStr
+    email: str
     username: str
     role: UserRole
+    company_id: Optional[int] = None
     is_active: bool
 
-    model_config = {"from_attributes": True}  # Pydantic v2
+    model_config = {"from_attributes": True}
 
 
 class UserUpdate(BaseModel):
@@ -35,4 +45,5 @@ class UserUpdate(BaseModel):
     username: Optional[str] = None
     password: Optional[str] = None
     role: Optional[UserRole] = None
+    company_id: Optional[int] = None
     is_active: Optional[bool] = None

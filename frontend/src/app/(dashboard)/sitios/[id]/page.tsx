@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { apiGet, ApiError } from "@/lib/api";
-import type { Site } from "@/types/api";
+import type { ChangeLog, Site } from "@/types/api";
 import Spinner from "@/components/ui/Spinner";
+import Button from "@/components/ui/Button";
 import StatusBadge from "@/components/features/sites/StatusBadge";
 import SiteFormModal from "@/components/features/sites/SiteFormModal";
 import { SiteIdProvider } from "@/store/SiteContext";
@@ -13,14 +14,17 @@ import ContentTab from "@/components/features/sites/ContentTab";
 import ColorsTab from "@/components/features/sites/ColorsTab";
 import LogosTab from "@/components/features/sites/LogosTab";
 import HistoryTab from "@/components/features/sites/HistoryTab";
+import LeadsTab from "@/components/features/sites/LeadsTab";
 import { SiteIcon } from "@/lib/siteIcons";
+import { formatDate } from "@/lib/format";
 
-const TABS = ["contenido", "colores", "logos", "historial"] as const;
+const TABS = ["contenido", "colores", "logos", "leads", "historial"] as const;
 type Tab = (typeof TABS)[number];
 const TAB_LABEL: Record<Tab, string> = {
   contenido: "Contenido",
   colores: "Colores",
   logos: "Logos",
+  leads: "Leads",
   historial: "Historial",
 };
 
@@ -34,6 +38,15 @@ export default function SiteDetailPage() {
   const [err, setErr] = useState<string>();
   const [tab, setTab] = useState<Tab>("contenido");
   const [editOpen, setEditOpen] = useState(false);
+  // Guardado coordinado: el header dispara `saveNonce`; la pestaña activa lo
+  // ejecuta y reporta su estado vía `onSaveInfo`.
+  const [saveNonce, setSaveNonce] = useState(0);
+  const [saveInfo, setSaveInfo] = useState<{ saving: boolean; dirty: boolean }>({
+    saving: false,
+    dirty: false,
+  });
+  const [lastModified, setLastModified] = useState<string | null>(null);
+  const editable = tab !== "historial" && tab !== "leads";
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -50,6 +63,22 @@ export default function SiteDetailPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Última fecha de modificación: la del historial al entrar.
+  useEffect(() => {
+    apiGet<ChangeLog[]>(`/history/${siteId}?limit=1`)
+      .then((logs) => { if (logs.length > 0) setLastModified(logs[0].created_at); })
+      .catch(() => {});
+  }, [siteId]);
+
+  // Tras un guardado exitoso (saving baja y ya no hay cambios) → "ahora".
+  const prevSaving = useRef(false);
+  useEffect(() => {
+    if (prevSaving.current && !saveInfo.saving && !saveInfo.dirty) {
+      setLastModified(new Date().toISOString());
+    }
+    prevSaving.current = saveInfo.saving;
+  }, [saveInfo]);
 
   if (loading)
     return (
@@ -108,18 +137,52 @@ export default function SiteDetailPage() {
               {site.url}
             </a>
           </div>
-          <button
-            type="button"
-            onClick={() => setEditOpen(true)}
-            className="shrink-0 inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-[var(--c-border)] text-[0.8125rem] text-[var(--c-text-sub)] hover:border-[var(--c-text-sub)] hover:text-[var(--c-text)] transition-colors cursor-pointer bg-transparent"
-          >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-              strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-              <path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4z" />
-            </svg>
-            Ajustes
-          </button>
+          <div className="shrink-0 flex items-center gap-2">
+            {/* Bandera de estado */}
+            {saveInfo.dirty ? (
+              <span
+                className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-dashed text-[0.8125rem] text-[var(--c-text-sub)]"
+                style={{ borderColor: "var(--c-st-maint)" }}
+              >
+                <span
+                  className="w-2 h-2 rounded-full shrink-0"
+                  style={{ background: "var(--c-st-maint)" }}
+                />
+                Editando
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-[var(--c-border)] text-[0.8125rem] text-[var(--c-muted)]">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                  strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <circle cx="12" cy="12" r="10" />
+                  <path d="M12 6v6l4 2" />
+                </svg>
+                {lastModified ? formatDate(lastModified) : "Sin cambios"}
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={() => setEditOpen(true)}
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-[var(--c-border)] text-[0.8125rem] text-[var(--c-text-sub)] hover:border-[var(--c-text-sub)] hover:text-[var(--c-text)] transition-colors cursor-pointer bg-transparent"
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                <path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4z" />
+              </svg>
+              Ajustes
+            </button>
+            {editable && (
+              <Button
+                onClick={() => setSaveNonce((n) => n + 1)}
+                loading={saveInfo.saving}
+                disabled={!saveInfo.dirty}
+                className="!w-auto"
+              >
+                Guardar
+              </Button>
+            )}
+          </div>
         </div>
 
         <nav className="flex gap-1 mt-4 -mb-3">
@@ -127,7 +190,10 @@ export default function SiteDetailPage() {
             <button
               key={t}
               type="button"
-              onClick={() => setTab(t)}
+              onClick={() => {
+                setTab(t);
+                setSaveInfo({ saving: false, dirty: false });
+              }}
               className={`relative px-3 py-2 text-[0.8125rem] font-medium transition-colors cursor-pointer ${
                 tab === t
                   ? "text-[var(--c-text)]"
@@ -145,9 +211,21 @@ export default function SiteDetailPage() {
 
       <div className="flex-1 min-h-0 overflow-y-auto px-5 md:px-8 py-6">
         <SiteIdProvider siteId={siteId}>
-          {tab === "contenido" && <ContentTab siteId={siteId} siteUrl={site.url} />}
-          {tab === "colores" && <ColorsTab siteId={siteId} />}
-          {tab === "logos" && <LogosTab siteId={siteId} />}
+          {tab === "contenido" && (
+            <ContentTab
+              siteId={siteId}
+              siteUrl={site.url}
+              saveNonce={saveNonce}
+              onSaveInfo={setSaveInfo}
+            />
+          )}
+          {tab === "colores" && (
+            <ColorsTab siteId={siteId} saveNonce={saveNonce} onSaveInfo={setSaveInfo} />
+          )}
+          {tab === "logos" && (
+            <LogosTab siteId={siteId} saveNonce={saveNonce} onSaveInfo={setSaveInfo} />
+          )}
+          {tab === "leads" && <LeadsTab siteId={siteId} />}
           {tab === "historial" && <HistoryTab siteId={siteId} />}
         </SiteIdProvider>
       </div>

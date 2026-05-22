@@ -33,6 +33,7 @@ class SiteUpdate(BaseModel):
 class SiteRead(SiteBase):
     id: int
     owner_id: UUID
+    company_id: int | None = None
     is_active: bool
     created_at: datetime
     updated_at: datetime
