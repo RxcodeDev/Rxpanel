@@ -406,6 +406,11 @@ function companyInitials(name: string) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** Avisa al sidebar (y a quien escuche) que los datos cambiaron. */
+function notifyDataChanged() {
+  window.dispatchEvent(new Event("rxpanel:data-changed"));
+}
+
 export default function EmpresasPage() {
   const toast = useToast();
   const { isAdmin } = useAuth();
