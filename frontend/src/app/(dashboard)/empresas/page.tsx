@@ -16,10 +16,12 @@ function CompanySitesModal({
   company,
   open,
   onClose,
+  onSaved,
 }: {
   company: Company | null;
   open: boolean;
   onClose: () => void;
+  onSaved?: () => void;
 }) {
   const toast = useToast();
   const [allSites, setAllSites] = useState<Site[]>([]);
